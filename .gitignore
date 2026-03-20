@@ -26,3 +26,7 @@ logs/
 # IDE
 .vscode/
 .idea/
+
+agibox-mcp
+
+*pyc

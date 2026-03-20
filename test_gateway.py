@@ -53,7 +53,6 @@ def make_headers(turn_id: str, user_message: str) -> dict:
     return {
         "Authorization":     f"Bearer {API_KEY}",
         "Content-Type":      "application/json",
-        "X-App-Id":          APP_ID,
         "X-Turn-Id":         turn_id,
         "X-Session-Id":      SESSION_ID,
         "X-Conversation-Id": "null",
@@ -100,7 +99,6 @@ async def test_invalid_key(client: httpx.AsyncClient):
         headers={
             "Authorization":     "Bearer sk-fai-chave-invalida-aqui",
             "Content-Type":      "application/json",
-            "X-App-Id":          APP_ID,
             "X-Turn-Id":         turn_id,
             "X-Session-Id":      SESSION_ID,
             "X-Conversation-Id": "null",
@@ -127,7 +125,6 @@ async def test_missing_header(client: httpx.AsyncClient):
             "Authorization": f"Bearer {API_KEY}",
             "Content-Type":  "application/json",
             # X-Turn-Id em falta propositadamente
-            "X-App-Id":      APP_ID,
             "X-Session-Id":  SESSION_ID,
         },
         json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "teste"}]},

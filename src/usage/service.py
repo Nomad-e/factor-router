@@ -91,6 +91,7 @@ async def record_turn_usage(
             await conn.execute(
                 """
                 INSERT INTO llm_usage_log (
+                    turn_id,
                     app_id, chat_session_id, user_id, user_name, user_email,
                     company_id, company_name, conversation_id, user_message,
                     model_id, prompt_tokens, completion_tokens, total_tokens,
@@ -98,14 +99,16 @@ async def record_turn_usage(
                     input_cost_usd, output_cost_usd, total_cost_usd,
                     tool_calls_count, meta
                 ) VALUES (
-                    $1,  $2,  $3,  $4,  $5,
-                    $6,  $7,  $8,  $9,
-                    $10, $11, $12, $13,
-                    $14, $15,
-                    $16, $17, $18,
-                    $19, $20::jsonb
+                    $1,
+                    $2,  $3,  $4,  $5,  $6,
+                    $7,  $8,  $9,  $10,
+                    $11, $12, $13, $14,
+                    $15, $16,
+                    $17, $18, $19,
+                    $20, $21::jsonb
                 )
                 """,
+                turn_id,
                 app_id, chat_session_id, user_id, user_name, user_email,
                 company_id, company_name, conversation_id, truncated_msg,
                 model_id, prompt_tokens, completion_tokens, total_tokens,
@@ -168,7 +171,7 @@ async def get_usage_logs(
 
     query = f"""
         SELECT
-            id, created_at, app_id, chat_session_id,
+            id, created_at, turn_id, app_id, chat_session_id,
             user_id, user_name, user_email,
             company_id, company_name, conversation_id,
             user_message, model_id,
@@ -190,6 +193,7 @@ async def get_usage_logs(
         {
             "id":                  row["id"],
             "created_at":          row["created_at"].isoformat(),
+            "turn_id":             row["turn_id"],
             "app_id":              row["app_id"],
             "chat_session_id":     row["chat_session_id"],
             "user_id":             row["user_id"],

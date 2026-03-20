@@ -1,22 +1,29 @@
 """
 src/api/routes/proxy.py
 
-Rota FastAPI — POST /v1/chat/completions.
-Delega a lógica em src.gateway.proxy.handle_chat_completions.
+Endpoint principal do gateway — POST /v1/chat/completions.
+Compatível com OpenAI SDK (drop-in replacement).
+
+Fluxo:
+1. Autentica a API Key (auth.py)
+2. Valida e extrai os headers de contexto (context.py)
+3. Chama o router para decidir o model_id
+4. Faz proxy do request para o OpenRouter (stream ou non-stream)
+5. Regista o custo no fim do turno
+
+Este ficheiro define apenas o endpoint.
+A lógica de proxy e streaming vive em src/gateway/proxy.py (próximo passo).
 """
 from __future__ import annotations
 
-import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.gateway.auth import AuthenticatedApp, authenticate
-from src.gateway.config import Settings, get_settings
 from src.gateway.context import GatewayContext
-from src.gateway.proxy import handle_chat_completions
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -39,21 +46,14 @@ async def chat_completions(
     request: Request,
     auth: Annotated[AuthenticatedApp, Depends(authenticate)],
     ctx: Annotated[GatewayContext, Depends(GatewayContext.from_headers)],
-    settings: Annotated[Settings, Depends(get_settings)],
 ):
     """
     Proxy transparente para o OpenRouter com routing automático de modelos.
-
-    O app_id vem do auth (API Key) — fonte de verdade.
-    O header X-App-Id é apenas para logging; não pode falsificar identidade.
+    O app_id vem sempre da API Key — nunca de headers enviados pelo agente.
     """
-    if ctx.app_id != auth.app_id:
-        logger.warning(
-            "X-App-Id '%s' does not match the API key (actual app_id: '%s'). "
-            "Using the app_id from the API key.",
-            ctx.app_id,
-            auth.app_id,
-        )
-        ctx.app_id = auth.app_id
+    # Injeta o app_id da API Key no contexto
+    ctx.app_id = auth.app_id
 
-    return await handle_chat_completions(request, ctx, settings)
+    from src.gateway.config import get_settings
+    from src.gateway.proxy import handle_chat_completions
+    return await handle_chat_completions(request, ctx, get_settings())

@@ -172,8 +172,8 @@ async def _proxy_stream(
                         if raw_line.startswith("data: "):
                             data_str = raw_line[6:].strip()
                             if data_str == "[DONE]":
-                                is_last_call = True
-                                continue
+                                continue  # fim do stream SSE — não fecha o turno
+                                          # quem fecha é o finish_reason=stop no chunk anterior
                             try:
                                 chunk_data = json.loads(data_str)
                                 p, c, t = _extract_usage_from_chunk(chunk_data)
@@ -306,7 +306,7 @@ async def handle_chat_completions(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "invalid_body",
-                "message": "O body deve ser JSON válido no formato OpenAI.",
+                "message": "The body must be valid JSON in OpenAI format.",
             },
         )
 
@@ -356,7 +356,7 @@ async def handle_chat_completions(
         )
 
         logger.info(
-            "Turn [%s] app=%s company=%s → model=%s (est ~%d tokens)",
+            "Turno [%s] app=%s company=%s → model=%s (est ~%d tokens)",
             ctx.turn_id[:8],
             ctx.app_id,
             ctx.company_id,

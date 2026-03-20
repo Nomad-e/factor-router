@@ -1,1 +1,1 @@
-psql "postgresql://admin-factor-router:6b7b961d9ed6ab2b46f11f2c751c7bc4@postgres:5432/factor_router" -f migrations/002_llm_usage_log.sql
+psql "postgresql://admin-factor-router:6b7b961d9ed6ab2b46f11f2c751c7bc4@localhost:5431/factor_router" -f migrations/002_llm_usage_log.sql
