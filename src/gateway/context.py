@@ -22,6 +22,7 @@ Headers obrigatórios que aceitam "null" (ausente = 400, valor desconhecido = "n
 from __future__ import annotations
 
 import uuid
+import urllib.parse
 from typing import Annotated
 
 from fastapi import Header, HTTPException, status
@@ -30,6 +31,19 @@ from fastapi import Header, HTTPException, status
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _decode(value: str) -> str:
+    """
+    Faz URL-decode do valor do header para preservar UTF-8.
+    Os agentes enviam os headers com percent-encoding:
+        "Ol%C3%A1%20como%20est%C3%A1s%3F" -> "Ola como estas?"
+    Valores nao encoded passam sem alteracao (retrocompativel).
+    """
+    try:
+        return urllib.parse.unquote(value, encoding="utf-8")
+    except Exception:
+        return value
+
 
 def _require(value: str | None, header_name: str) -> str:
     """Garante que o header existe. Ausente = 400 explícito."""
@@ -135,16 +149,16 @@ class GatewayContext:
 
         conversation_id = _nullable(x_conversation_id, "X-Conversation-Id")
         user_id         = _nullable(x_user_id,         "X-User-Id")
-        user_name       = _nullable(x_user_name,       "X-User-Name")
+        user_name       = _decode(_nullable(x_user_name,    "X-User-Name") or "") or None
         user_email      = _nullable(x_user_email,      "X-User-Email")
         company_id      = _nullable(x_company_id,      "X-Company-Id")
-        company_name    = _nullable(x_company_name,    "X-Company-Name")
+        company_name    = _decode(_nullable(x_company_name, "X-Company-Name") or "") or None
 
         return cls(
             turn_id=turn_id,
             session_id=session_id,
             conversation_id=conversation_id,
-            user_message=user_msg[:300],
+            user_message=_decode(user_msg)[:300],
             user_id=user_id,
             user_name=user_name,
             user_email=user_email,
