@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables (SENSITIVE - Never commit .env!)
+.*
+# Permitir .env.example e .env.docker (templates sem secrets)
+!.env.example
+!.gitignore
+!.gitattributes
+!.github
+!.pre-commit
+
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,1 @@
+python3 -c "import secrets; print('sk-fai-' + secrets.token_hex(260))"
