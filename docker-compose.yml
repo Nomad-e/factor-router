@@ -3,7 +3,7 @@ services:
   # ── Base de dados ──────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: factor_router_postgres
+    container_name: router-db
     restart: unless-stopped
     env_file:
       - .env
@@ -22,11 +22,12 @@ services:
       - factor_router_net
 
   # ── Gateway API ────────────────────────────────────────────────────────────
-  factor_router:
+  router-api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: factor_router_api
+    image: router-api:0.0.1
+    container_name: router-api
     restart: unless-stopped
     env_file:
       - .env
@@ -43,7 +44,7 @@ services:
 # ── Volumes ────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
-    name: factor_router_postgres_data
+    name: router-db-data
 
 # ── Network ───────────────────────────────────────────────────────────────
 networks:

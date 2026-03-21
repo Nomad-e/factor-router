@@ -1,200 +1,187 @@
 # =============================================================================
-# FACTOR AI ERP AGENT — MODEL ROUTING CONFIGURATION
+# FACTOR AI — MODEL ROUTING CONFIGURATION
 # =============================================================================
 #
-# This file is read by the classifier (Qwen3-0.6B local) to decide which
-# LLM model to use for each user request to the Factor AI ERP Agent.
+# PRINCIPLE: Good, Clean, and Cheap
+#   The router does not match keywords. It reasons about SEMANTIC PATTERNS:
+#   - How deep is the reasoning required?
+#   - How many tools will the agent call?
+#   - Is there a Many2one to resolve?
+#   - Does the answer require synthesis across multiple domains?
+#   - What is the cost of an error?
 #
-# The classifier receives the user message + this file and returns
-# the most suitable model in JSON format: {"model": "provider/model-id"}
-#
-# TASK TYPES (match first, then pick cheapest model for that type):
-#   simple    → explicação, conceitos, página atual. ZERO tool calls. Resposta do page_context ou conversa.
-#   long      → traduzir, extrair, formatar, transcrever. Dados no texto/página, sem search_read no ERP.
-#   reasoning → listar, contar, criar, atualizar simples. 1-3 tool calls, modelo único, campos diretos.
-#   reasoning+→ comparar, agregar, multi-step, Many2one simples. 2-5 tool calls no ERP.
-#   complex   → workflows, Many2one complexo, agentic longo, self-correction. 3-10 tool calls. LAST RESORT.
-#
-# ESCALATION LADDER (cheapest output → most capable):
-#   gpt-5.4-nano ($1.25) → kimi-k2.5 ($2.20) → gpt-5.4-mini ($4.50)
-#   → gpt-oss-120b:exacto ($2.34) → qwen3.5-397b ($2.34) → glm-5 ($2.56)
-#
-# PRINCIPLE: Bom, Bonito e Barato — use the CHEAPEST model that does the job correctly.
-#   - Gemini 3.1 Flash Lite: default for all simple/context/RAG tasks — 1M context.
-#   - DeepSeek V3.2: cheapest output ($0.40) — squeeze for all text processing.
-#   - gpt-oss-120b:exacto: deterministic tool calling — no confabulation on ERP args.
-#   - Qwen3.5-397b: multi-step reasoning — 262K context, strong generalization.
-#   - GLM-5: agentic long-horizon workflows — self-correction, complex orchestration. LAST RESORT.
-#
-# AGENT CONTEXT:
-#   The Factor AI ERP Agent is a dynamic agent operating on top of Factor AI ERP.
-#   The agent has access to:
-#     - ERP API tools: list_available_models, inspect_model_fields, execute_erp_command
-#     - Current page context (ERP interface DOM injected into the system prompt)
-#     - Conversation history (Redis + PostgreSQL)
-#     - User biographical memory (ChromaDB)
-#     - User permissions and groups (Redis cache)
-#     - Installed modules on the Factor AI ERP instance
-#   The agent can execute up to 15 chained tool calls per request.
+# ESCALATION LADDER (output cost, cheapest to most capable):
+#   MiMo-V2-Omni   $2.00/M  — direct ERP queries, 1-5 tool calls
+#   Kimi K2.5       $2.20/M  — multi-step, Many2one, 2-8 tool calls
+#   GPT-5.4 Mini    $4.50/M  — complex workflows, critical quality, 3-12 tools
+#   Claude Sonnet   $15.0/M  — long-horizon agentic, self-correction, LAST RESORT
 # =============================================================================
 
 models:
 
   # ---------------------------------------------------------------------------
-  # TASK: simple — explicação, conceitos, página atual. ZERO tool calls.
-  # DEFAULT MODEL — handles 70%+ of all requests.
+  # TIER 1 — MiMo-V2-Omni (DEFAULT)
+  # Cheapest, fast, strong at tool calling and structured reasoning
   # ---------------------------------------------------------------------------
-  - id: "openai/gpt-5.1-codex-mini"
-    tier: "light"
-    task_type: "simple"
-    context_window: 400000
+  - id: "xiaomi/mimo-v2-omni"
+    tier: "reasoning"
+    task_type: "reasoning"
+    context_window: 262144
     pricing:
-      input_per_1m_tokens: "$0.25"
+      input_per_1m_tokens:  "$0.40"
       output_per_1m_tokens: "$2.00"
     description: >
-      Default model. For all requests that need ZERO data fetch from the ERP.
-      Answer comes entirely from page_context (DOM injected into system prompt)
-      or conversation history. Supports thinking levels (minimal→high) for
-      cost/performance trade-offs. 1M context handles the largest ERP page_context
-      injections. Best-in-class for RAG snippet ranking, translation, data extraction,
-      audio/ASR, and code completion — all without ERP tool calls.
-      If the user asks to list, count, update, create, compare, or fetch ANYTHING
-      from the ERP database — that is NOT simple. Use reasoning tier or higher.
+      MiMo-V2-Omni by Xiaomi — frontier omni-modal model with unified architecture
+      for text, image, video and audio. Combines strong agentic capability with visual
+      grounding, multi-step planning, tool use and code execution.
+      262K context. $0.40/$2.00 per 1M tokens.
+
+      PATTERNS FOR THIS MODEL:
+        - User asks a direct question answerable from the ERP with 1-5 linear tool calls
+        - Query has clear structure: who, what, when, how much
+        - No synthesis across multiple Agiweb domains — focused on one model at a time
+        - State queries: "what is the balance", "how many orders", "list clients of X"
+        - Simple CRUD: create or update one record with known fields
+        - Linear reasoning — no ambiguity about what to do next
+        - Questions about the current Agiweb page the user is viewing
+        - Normal conversation, follow-up questions, explanation requests
     best_for:
-      - >
-        User asks to explain or describe what is on the CURRENT page —
-        page_context has the info, no tool call needed —
-        examples: 'explica esta página', 'what is on this screen?',
-        'what does this error mean?', 'o que estou a ver?', 'o que significa este campo?'
-      - >
-        Pure conceptual question with NO data fetch —
-        examples: 'what is an accounting journal?',
-        'what is the difference between a quotation and a sale order?',
-        'how does the CRM module work?', 'o que é um diário contabilístico?'
-      - >
-        Casual conversation —
-        examples: 'what can you help with?', 'olá', 'obrigado', 'bom dia',
-        'help me understand where to start'
-      - >
-        Listing installed modules (single lightweight call) —
-        examples: 'what modules do I have installed?', 'que módulos tenho?'
-      - >
-        RAG snippet ranking — selecting the most relevant chunk from pre-fetched
-        ERP documentation or knowledge base snippets injected into context
-      - >
-        Audio/voice input transcription and ASR post-processing when the agent
-        receives voice input — 'transcribe and clean up this voice note'
+      - "Direct Agiweb queries with 1-5 linear tool calls: 'total sales this week', 'list overdue invoices for client X'"
+      - "Single Agiweb model CRUD with known fields: 'update phone for contact', 'mark task as done'"
+      - "Questions about the current Agiweb page or conversation context"
+      - "Simple conversation, follow-up, explanations, formatting of existing data"
     not_for: >
-      'lista X', 'quantos Y', 'resume os tickets', 'compare X com Y', 'actualiza-me',
-      any request implying fetching, counting, creating, or updating ERP data —
-      use reasoning or higher.
+      Queries requiring comparison across multiple periods or entities,
+      conditional workflows, deep Many2one resolution,
+      aggregation across 3+ different Agiweb models.
 
 
   # ---------------------------------------------------------------------------
-  # TASK: reasoning+ — comparar, agregar, multi-step, Many2one simples. 2-5 tool calls.
-  # GPT-5.4 nano: mais barato e rápido (Mar 2026). Classifier escolhe o mais adequado.
+  # TIER 2 — Kimi K2.5
+  # Strong at multi-step reasoning, Many2one resolution, agent swarm
   # ---------------------------------------------------------------------------
-  - id: "openai/gpt-5.4-nano"
-    tier: "medium-high"
+  - id: "moonshotai/kimi-k2.5"
+    tier: "reasoning+"
     task_type: "reasoning+"
-    context_window: 400000
+    context_window: 262144
     pricing:
-      input_per_1m_tokens: "$0.20"
-      output_per_1m_tokens: "$1.25"
-    description: >
-      OpenAI GPT-5.4 nano — lightest and most cost-efficient in the GPT-5.4 family (Mar 2026).
-      Optimized for speed and high-volume: classification, data extraction, ranking,
-      and agentic tool use. 400K context. Strong on agentic (tau2-bench, SWE-Bench Pro)
-      and STEM (GPQA). Use for multi-step ERP operations, aggregation, comparisons —
-      2-5 tool calls. Cheaper and lower latency than Kimi; prefer for most reasoning+ tasks.
-    best_for:
-      - >
-        Multi-step reasoning with 2-5 chained ERP tool calls —
-        examples: 'compare sales this month vs last', 'list open tickets and summarize by priority'
-      - >
-        Aggregation and comparison — 'total revenue by product', 'how many invoices are overdue?'
-      - >
-        Many2one resolution — 'create a sale order for client ABC', 'assign this task to user X'
-    not_for: >
-      Simple single-call tasks; deep math/code reasoning (prefer Codex-mini or Kimi).
-
-  # ---------------------------------------------------------------------------
-  # TASK: reasoning+ (alternativa) — Kimi K2.5, reasoning profundo, thinking tokens.
-  # ---------------------------------------------------------------------------
-  - id: "anthropic/claude-sonnet-4.6"
-    tier: "medium-high"
-    task_type: "reasoning+"
-    context_window: 262000
-    pricing:
-      input_per_1m_tokens: "$0.45"
+      input_per_1m_tokens:  "$0.45"
       output_per_1m_tokens: "$2.20"
     description: >
-      Moonshot AI native multimodal model with strong performance in general reasoning,
-      visual coding, and agentic tool-calling. Self-directed agent paradigm.
-      262K context, cheaper output than GLM-5 and Qwen. Use for multi-step ERP
-      operations, aggregation, comparisons, and Many2one resolution — 2-5 tool calls.
-      Escalate to GLM-5 for complex long-horizon workflows or self-correction needs.
+      Kimi K2.5 by MoonshotAI — state-of-the-art in visual coding and autonomous agent paradigm.
+      Built on Kimi K2 with ~15T mixed visual and text tokens. Strong in general reasoning,
+      visual coding and agentic tool-calling. 262K context. $0.45/$2.20 per 1M tokens.
+
+      PATTERNS FOR THIS MODEL:
+        - Query requires comparison or aggregation across 2-4 entities or time periods
+        - Many2one to resolve: user mentions names that need ID lookup before create/update
+        - Multiple Agiweb models involved but with known relationships
+        - Query has ambiguity about which field or model to use — requires exploration
+        - Light conditional reasoning: "if X then Y, else Z" with 1-2 levels
+        - Financial analysis with 2-5 tool calls and some mathematical aggregation
+        - Questions mentioning images, charts or visual Agiweb data
     best_for:
-      - >
-        Multi-step reasoning with 2-5 chained ERP tool calls —
-        examples: 'compare sales this month vs last', 'list open tickets and summarize by priority',
-        'create a customer and add them to a mailing list'
-      - >
-        Aggregation and comparison tasks requiring search_read + analysis —
-        examples: 'total revenue by product', 'how many invoices are overdue?',
-        'top 5 customers by sales volume'
-      - >
-        Many2one resolution with 1-2 lookups before create/write —
-        examples: 'create a sale order for client ABC', 'assign this task to user X'
+      - "Multi-step 2-8 tools with Many2one: 'create a sale for BOLTHERM with products from last quote'"
+      - "Cross-model aggregation: 'total invoiced this month by client and product'"
+      - "Ambiguity resolution: 'assign to the BOLTHERM account manager' (needs ID lookup)"
+      - "Financial analysis: 'average margin per product in Q1', 'overdue receivables over 30 days'"
     not_for: >
-      Simple single-call tasks.
+      Workflows with 8+ tool calls and complex conditional logic,
+      iterative self-correction, multi-agent orchestration,
+      re-planning mid-execution.
+
 
   # ---------------------------------------------------------------------------
-  # TASK: reasoning+ (mais capaz) — GPT-5.4 mini, balance capability/efficiency (Mar 2026).
+  # TIER 3 — GPT-5.4 Mini
+  # Production balance — complex workflows, critical quality
   # ---------------------------------------------------------------------------
   - id: "openai/gpt-5.4-mini"
-    tier: "medium-high"
-    task_type: "reasoning+"
+    tier: "complex"
+    task_type: "complex"
     context_window: 400000
     pricing:
-      input_per_1m_tokens: "$0.75"
+      input_per_1m_tokens:  "$0.75"
       output_per_1m_tokens: "$4.50"
     description: >
-      OpenAI GPT-5.4 mini — core GPT-5.4 capabilities in a faster, efficient model (Mar 2026).
-      Strong performance across reasoning, coding, and tool use. 400K context.
-      Balanced for production: chat, coding assistants, agent workflows at scale.
-      Reliable instruction following, solid multi-step reasoning, consistent across tasks.
-      Use when reasoning+ tasks need more capability than nano/Kimi — higher cost, better quality.
+      GPT-5.4 Mini by OpenAI — core GPT-5.4 capabilities in a faster, efficient model.
+      Strong across reasoning, coding and tool use. 400K context fits long histories
+      and large page contexts. $0.75/$4.50 per 1M tokens.
+
+      PATTERNS FOR THIS MODEL:
+        - Workflow requiring 5-12 tool calls with multi-level conditional logic
+        - Cascading creation: create A, then use A to create B and C
+        - Mid-execution re-planning: agent discovers mid-run that more data is needed
+        - Deep Many2one with multiple resolution levels
+        - Reports combining 4+ different Agiweb models
+        - Very long conversation history requiring coherence across many turns
+        - Critical quality: errors have real consequences (wrong PO, wrong approval)
     best_for:
-      - >
-        Multi-step reasoning with 2-5 chained ERP tool calls where quality matters —
-        complex comparisons, multi-model aggregation, nuanced Many2one resolution
-      - >
-        Agent workflows that benefit from stronger instruction following and reasoning —
-        'compare and summarize sales by region and product', 'create order and link to project'
-      - >
-        Tasks that may need slightly deeper reasoning than nano/Kimi without going to complex tier
+      - "Workflows 5-12 tools with conditionals: 'create quote with discount if total exceeds 5000'"
+      - "Cascading creation: 'create client, contact, linked project, and first task'"
+      - "Complex multi-module reports: 'full overview of everything that happened today'"
+      - "Long context requiring coherence: conversation with 10+ turns and interdependent decisions"
     not_for: >
-      Simple single-call tasks; when nano or Kimi are sufficient (prefer cheaper first).
+      Tasks that MiMo or Kimi can handle. Escalate only when necessary.
+      Do not use as default — reserve for genuinely complex or high-stakes requests.
+
+
+  # ---------------------------------------------------------------------------
+  # TIER 4 — Claude Sonnet 4.6 (LAST RESORT)
+  # Frontier agentic — self-correction, 1M context, explicit user request only
+  # ---------------------------------------------------------------------------
+  - id: "anthropic/claude-sonnet-4.6"
+    tier: "frontier"
+    task_type: "frontier"
+    context_window: 1000000
+    pricing:
+      input_per_1m_tokens:  "$3.00"
+      output_per_1m_tokens: "$15.00"
+    description: >
+      Claude Sonnet 4.6 by Anthropic — frontier performance in coding, agents and
+      professional work. 1M context. Excellent at iterative development, complex codebase
+      navigation, end-to-end project management, polished document creation and computer use.
+      $3.00/$15.00 per 1M tokens.
+
+      USE ONLY WHEN:
+        - User explicitly requests "reasoning+" or "deep analysis" in their message
+        - 10+ tool calls with expected self-correction and iterative re-planning
+        - End-to-end project management workflows with many dependencies
+        - Creation of long, polished documents (reports, proposals, contracts)
+        - Context so long (>50K tokens) that other models lose coherence
+        - Strategic business analysis requiring multi-dimensional reasoning
+    best_for:
+      - "User explicitly asks for reasoning+: 'give me a full overview using reasoning+'"
+      - "Strategic business analysis: 'analyse Q1 performance and recommend Q2 focus areas'"
+      - "Polished document creation: 'prepare a full commercial proposal for client X'"
+      - "Iterative self-correction in very long and complex agentic workflows"
+    not_for: >
+      ANY task that MiMo, Kimi or GPT-5.4 Mini can handle correctly.
+      Costs 7.5x more than MiMo on output tokens. ABSOLUTE LAST RESORT.
+      Only escalate when the user explicitly requests it or complexity is genuinely frontier.
+
+
+# =============================================================================
+# FALLBACK MODEL
+# Used when the classifier cannot determine the tier with confidence.
+# MiMo-V2-Omni — cheapest, 262K context, strong at tool calling.
+# =============================================================================
+default_model: "xiaomi/mimo-v2-omni"
 
 
 # =============================================================================
 # PRICING SUMMARY (OpenRouter — March 2026)
 # =============================================================================
 #
-#  Model                                  | Context | Input /1M  | Output /1M
-#  ---------------------------------------|---------|------------|------------
-#  openai/gpt-5.4-nano                    | 400K    | $0.20      | $1.25
-#  moonshotai/kimi-k2.5                   | 262K    | $0.45      | $2.20
-#  openai/gpt-5.4-mini                    | 400K    | $0.75      | $4.50
+#  Model                              | Context | Input /1M | Output /1M | Ratio vs MiMo
+#  -----------------------------------|---------|-----------|------------|---------------
+#  xiaomi/mimo-v2-omni                | 262K    | $0.40     | $2.00      | 1x   (baseline)
+#  moonshotai/kimi-k2.5               | 262K    | $0.45     | $2.20      | 1.1x
+#  openai/gpt-5.4-mini                | 400K    | $0.75     | $4.50      | 2.25x
+#  anthropic/claude-sonnet-4.6        | 1M      | $3.00     | $15.00     | 7.5x (last resort)
 #
-#  ESCALATION RULE: Cheapest first for reasoning+ → nano, then Kimi, then mini (more capable).
-#
+#  EXPECTED DISTRIBUTION:
+#    80% of queries → MiMo      ($2.00 output)
+#    15% of queries → Kimi      ($2.20 output)
+#     4% of queries → GPT Mini  ($4.50 output)
+#     1% of queries → Sonnet    (explicit user request only)
 # =============================================================================
-
-# =============================================================================
-# FALLBACK MODEL
-# Used when the classifier cannot determine the tier with sufficient confidence.
-# openai/gpt-5.1-codex-mini — 1M context, handles any page_context safely, cheap default.
-# =============================================================================
-default_model: "openai/gpt-5.1-codex-mini"

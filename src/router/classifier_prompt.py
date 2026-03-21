@@ -1,130 +1,147 @@
 """
-Factor AI ERP Agent — Classifier Prompt (part of llm_orchestrator)
---------------------------------------------------------------------
-Prompt com o MÁXIMO de informação: princípio de decisão, tiers, contexto do agente,
-e por modelo: id, tier, task_type, context window, custo, descrição completa, best_for completo.
-
-Stack — escalada por output (cheapest → most capable):
-  openai/gpt-5.1-codex-mini             → simple      ($0.25in / $2.00out)  ← default
-  openai/gpt-5.4-nano                   → reasoning+  ($0.20in / $1.25out)
-  moonshotai/kimi-k2.5                  → reasoning+  ($0.45in / $2.20out)
-  openai/gpt-5.4-mini                   → reasoning+  ($0.75in / $4.50out)
-
+Factor AI — Classifier Prompt
+-------------------------------
+Constrói os prompts para o classificador.
 """
 
-# Expected tool calls per tier
+# Número esperado de tool calls por tier — usado no prompt
 TIER_TOOL_CALLS = {
-    "light": "0",
-    "medium-low": "0-1",
-    "medium": "1-3",
-    "medium-high": "2-5",
-    "heavy-lite": "3-10",
-    "heavy": "5-15",
+    "reasoning":  "1-5",
+    "reasoning+": "2-8",
+    "complex":    "5-12",
+    "frontier":   "10+",
 }
 
-ROUTING_CONTEXT = """
-TASK TYPES — match first, then pick CHEAPEST model:
-  simple    → explicação, conceitos, página atual. ZERO tool calls. Resposta do page_context ou conversa.
-  long      → traduzir, extrair, formatar, transcrever. Dados no texto, sem search_read no ERP.
-  reasoning → listar, contar, criar, atualizar simples. 1-3 tool calls. Modelo único, campos diretos.
-  reasoning+→ comparar, agregar, multi-step, Many2one simples. 2-5 tool calls no ERP.
-  complex   → workflows, Many2one complexo, agentic longo, self-correction. 3-10 tool calls. LAST RESORT.
-
-PRINCIPLE: Bom, Bonito e Barato — use the CHEAPEST model that does the job correctly.
-  Default to Gemini 3.1 Flash Lite when in doubt — 1M context, safe for page_context.
-
-AGENT CONTEXT (what the agent can do):
-  - ERP API: list_available_models, inspect_model_fields, execute_erp_command (search_read, create, write...)
-  - Page context (current ERP DOM injected into system prompt)
-  - Conversation history, user memory, permissions, installed modules
-  - Maximum 15 chained tool calls per request
+# Contexto do agente em inglês — entra no prompt do classificador
+AGENT_CONTEXT = """
+AGENT CONTEXT:
+  The Severino Agent operates on top of Agiweb.
+  The agent has access to:
+    - Agiweb tools: list_available_models, inspect_model_fields, execute_erp_command
+    - Conversation history, user memory, permissions, installed modules, etc.
+  The agent can execute up to 15 chained tool calls per request.
 """
 
-CLASSIFIER_SYSTEM_PROMPT = """You are a model routing classifier for the Factor AI ERP Agent.
+# System prompt do classificador — inglês puro, raciocínio em 5 passos
+CLASSIFIER_SYSTEM_PROMPT = """You are a model routing classifier for the Severino Agent.
 
-Your ONLY job is to read the user message and decide which LLM model is best suited
-to handle it, based on the ROUTING CONTEXT and AVAILABLE MODELS below.
+Your ONLY job is to read the user message and decide which LLM model is best suited,
+based on SEMANTIC PATTERNS in the message — not on keywords.
 
-ROUTING CONTEXT (read this first):
-{routing_context}
+{agent_context}
 
-IMPORTANT — Your decision has direct business impact:
-  - Wrong model (too capable) = unnecessary cost to the company.
-  - Wrong model (too cheap) = agent fails, loses user trust and time.
-  - Your routing decision directly influences the final agent response and business outcome.
-  - Principle: Bom, Bonito e Barato — good, clean, and cheap. Escalate only when necessary.
+HOW TO REASON (always follow these steps before deciding):
+
+  STEP 1 — REASONING DEPTH:
+    How many logical steps are needed to answer?
+    Is the answer direct or does it require chaining logic?
+    → 0-1 logical hops = reasoning tier
+    → 2-3 hops = reasoning+ tier
+    → 4+ hops with conditionals = complex or frontier tier
+
+  STEP 2 — TOOL CALLS:
+    How many tools will the agent need to call?
+    Is there a Many2one to resolve? (e.g. "for client BOLTHERM" requires an ID lookup)
+    → 1-5 linear calls = reasoning
+    → 2-8 calls with some Many2one = reasoning+
+    → 5-12 calls with conditional logic = complex
+    → 10+ calls with expected self-correction = frontier
+
+  STEP 3 — SYNTHESIS:
+    Does the answer require combining data from multiple Agiweb models?
+    Is there comparison across time periods, entities, or categories?
+    → 1 Agiweb model = reasoning
+    → 2-3 models with known relationships = reasoning+
+    → 4+ models or unknown relationships = complex
+
+  STEP 4 — ERROR COST:
+    What is the impact if the agent makes a mistake?
+    → Read/query operations = low risk → use cheaper model
+    → Create/update critical records (orders, invoices, approvals, etc.) = high risk → use more capable model
+
+  STEP 5 — DECISION:
+    Pick the CHEAPEST model that can do the job CORRECTLY.
+    Escalate only when necessary.
+    Never use Claude Sonnet unless the user EXPLICITLY requests "reasoning+"
+    or the complexity is genuinely frontier-level.
+
+PRINCIPLE: Good, Clean, and Cheap.
+  Underestimating complexity = agent fails, user loses trust.
+  Overestimating complexity = unnecessary cost to the company.
 
 RULES:
-- Respond with ONLY a valid JSON object. No explanation. No markdown. No extra text.
-- Response format: {{"model": "provider/model-id"}}
-- First match user message to TASK TYPE. Then pick the CHEAPEST model for that type.
-- Use DESCRIPTION and BEST FOR to confirm the model fits.
-- Among models that CAN handle the task, choose the one with lowest output cost.
-- Valid model IDs (use exactly one): {valid_model_ids}
-- When in doubt, use the default model: {default_model}
+  - Reply with ONLY a valid JSON object. No explanation. No markdown. No extra text.
+  - Format: {{"model": "provider/model-id"}}
+  - Valid model IDs (use exactly one): {valid_model_ids}
+  - When in doubt, use the default: {default_model}
 
-AVAILABLE MODELS AND THEIR CAPABILITIES:
+AVAILABLE MODELS:
 {models_description}
 """
 
+# User prompt — inglês, inclui estimativa de tokens
 CLASSIFIER_USER_PROMPT = """User message: "{user_message}"
 
-Which model should handle this request? Reply with JSON only: {{"model": "provider/model-id"}}"""
+Estimated tokens: input ~{est_input}, output ~{est_output}, total ~{est_total}.
+Consider each model's context window and cost when deciding.
+
+Reply with ONLY valid JSON: {{"model": "provider/model-id"}}"""
 
 
-def _format_context(n):
-    if n is None or n == "?":
+def _format_context_window(n) -> str:
+    """Formata o context window para display no prompt."""
+    if n is None:
         return "?"
     if isinstance(n, int):
         if n >= 1_000_000:
-            return f"{n:,} ({n // 1_000_000}M)"
-        if n >= 1000:
-            return f"{n:,} ({n // 1000}K)"
+            return f"{n // 1_000_000}M tokens"
+        if n >= 1_000:
+            return f"{n // 1_000}K tokens"
         return str(n)
     return str(n)
 
 
 def build_models_description(models: list[dict]) -> str:
     """
-    Builds the full description of each model for the classifier:
-    id, tier, task_type, context window, cost, description, best_for, not_for,
-    expected tool calls per tier.
+    Constrói a descrição completa de cada modelo para o classificador.
+    Toda a descrição está em inglês — entra directamente no prompt da rede neural.
     """
     lines = []
     for m in models:
-        tier = m.get("tier", "?")
-        task_type = m.get("task_type", tier)
-        ctx_str = _format_context(m.get("context_window"))
-        pricing = m.get("pricing") or {}
-        input_cost = pricing.get("input_per_1m_tokens", "?")
+        tier        = m.get("tier", "?")
+        pricing     = m.get("pricing") or {}
+        input_cost  = pricing.get("input_per_1m_tokens",  "?")
         output_cost = pricing.get("output_per_1m_tokens", "?")
-        long_note = (pricing.get("long_context_note") or "").strip()
-        tool_calls = TIER_TOOL_CALLS.get(tier, "?")
+        ctx_str     = _format_context_window(m.get("context_window"))
+        tool_calls  = TIER_TOOL_CALLS.get(tier, "?")
 
         lines.append("---")
-        lines.append(f"MODEL ID: {m['id']}")
-        lines.append(f"TASK TYPE: {task_type}  |  TIER: {tier}  |  EXPECTED TOOL CALLS: {tool_calls}")
-        lines.append(f"CONTEXT WINDOW: {ctx_str} tokens")
-        lines.append(f"COST: input {input_cost} / output {output_cost} per 1M tokens")
-        if long_note:
-            lines.append(f"COST NOTE: {long_note}")
+        lines.append(f"MODEL: {m['id']}")
+        lines.append(
+            f"TIER: {tier} | EXPECTED TOOL CALLS: {tool_calls} | "
+            f"CONTEXT: {ctx_str} | COST: {input_cost} input / {output_cost} output per 1M tokens"
+        )
         lines.append("")
-        lines.append("DESCRIPTION:")
         lines.append(m.get("description", "").strip())
         lines.append("")
-        lines.append("BEST FOR (match user message to these use cases and examples):")
-        for use_case in m.get("best_for") or []:
-            lines.append(f"  - {use_case.strip()}")
+
+        best_for = m.get("best_for") or []
+        if best_for:
+            lines.append("BEST FOR:")
+            for use_case in best_for:
+                lines.append(f"  - {use_case.strip()}")
+
         not_for = (m.get("not_for") or "").strip()
         if not_for:
-            lines.append("")
-            lines.append(f"NOT FOR (do not pick this model if user asks): {not_for}")
+            lines.append(f"DO NOT USE WHEN: {not_for}")
+
         lines.append("")
 
     return "\n".join(lines)
 
 
 def _valid_model_ids(models: list[dict]) -> str:
+    """Devolve os IDs válidos formatados para o prompt."""
     return ", ".join(f'"{m["id"]}"' for m in models)
 
 
@@ -132,23 +149,34 @@ def build_classifier_prompt(
     user_message: str,
     models: list[dict],
     default_model: str,
+    estimated_input_tokens: int = 0,
+    estimated_output_tokens: int = 0,
 ) -> tuple[str, str]:
     """
-    Builds the full system + user prompt for the classifier.
+    Constrói o system prompt e o user prompt para o classificador Ollama.
+
+    Tudo o que entra na rede neural está em inglês.
+    O classificador raciocina em 5 passos antes de decidir o modelo.
 
     Returns:
-        (system_prompt, user_prompt) — pass both to the local Qwen3-0.6B classifier.
+        (system_prompt, user_prompt)
     """
-    models_description = build_models_description(models)
-    valid_ids = _valid_model_ids(models)
+    models_desc = build_models_description(models)
+    valid_ids   = _valid_model_ids(models)
+    est_total   = estimated_input_tokens + estimated_output_tokens
 
     system = CLASSIFIER_SYSTEM_PROMPT.format(
-        routing_context=ROUTING_CONTEXT.strip(),
+        agent_context=AGENT_CONTEXT.strip(),
         valid_model_ids=valid_ids,
         default_model=default_model,
-        models_description=models_description,
+        models_description=models_desc,
     )
 
-    user = CLASSIFIER_USER_PROMPT.format(user_message=user_message)
+    user = CLASSIFIER_USER_PROMPT.format(
+        user_message=user_message,
+        est_input=estimated_input_tokens,
+        est_output=estimated_output_tokens,
+        est_total=est_total,
+    )
 
     return system, user

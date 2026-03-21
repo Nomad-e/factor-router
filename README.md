@@ -546,7 +546,7 @@ Se o Ollama não estiver disponível ou exceder o timeout, o gateway usa o `defa
 - Cada app só pode ver os seus próprios logs de uso — `app_id` é sempre inferido da API Key
 - Uma app não pode declarar um `app_id` diferente — o header `X-App-Id` não existe
 - Admin API protegida por `X-Admin-Secret` separado das API Keys das apps
-- Postgres não exposto externamente — só acessível dentro da rede Docker `factor_router_net`
+- Postgres acessível na porta host `5431` e na rede Docker `router_net` (hostname do serviço: `router-db`)
 
 ### Boas práticas
 
@@ -615,18 +615,19 @@ llm_usage_log
 ### Migrações
 
 ```bash
-# Aplicar manualmente (se necessário)
-docker exec -i factor_router_postgres psql -U factor_router -d factor_router -f - \
+# Aplicar manualmente (usa POSTGRES_USER e POSTGRES_DB do teu .env)
+set -a && source .env && set +a
+docker exec -i router-db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - \
   < migrations/001_gateway_apps.sql
 
-docker exec -i factor_router_postgres psql -U factor_router -d factor_router -f - \
+docker exec -i router-db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - \
   < migrations/002_llm_usage_log.sql
 
-docker exec -i factor_router_postgres psql -U factor_router -d factor_router -f - \
+docker exec -i router-db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - \
   < migrations/003_add_turn_id_to_llm_usage_log.sql
 ```
 
-> As migrações em `./migrations/` correm **automaticamente** no primeiro arranque do container Postgres (pasta mapeada para `/docker-entrypoint-initdb.d/`).
+> O `docker-compose` atual **não** monta volumes: não há persistência nem execução automática de `./migrations/`. Corre os SQL acima após o primeiro `up` (ou sempre que recriares o container sem dados).
 
 ---
 
@@ -672,7 +673,7 @@ factor_router/
 ```bash
 uv sync
 cp .env.example .env
-# editar .env — usar localhost em vez de postgres para DATABASE_URL
+# editar .env — fora do Docker: `localhost:5431`; dentro da stack: host `router-db`, porta `5432`
 
 uv run run.py
 ```
@@ -688,14 +689,15 @@ docker compose up -d --build --force-recreate
 ### Logs em tempo real
 
 ```bash
-docker logs -f factor_router_api
-docker logs -f factor_router_postgres
+docker logs -f router-api
+docker logs -f router-db
 ```
 
 ### Aceder ao Postgres
 
 ```bash
-docker exec -it factor_router_postgres psql -U factor_router -d factor_router
+set -a && source .env && set +a   # ou exporta POSTGRES_USER e POSTGRES_DB à mão
+docker exec -it router-db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
 ---
