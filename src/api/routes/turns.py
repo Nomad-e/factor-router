@@ -31,6 +31,10 @@ from src.gateway.context import GatewayContext
 from src.gateway.accumulator import get_accumulator
 from src.gateway.proxy import _create_flush_task
 
+# Set de turn_ids que já fizeram flush — evita duplicate inserts
+# quando o agente chama /end múltiplas vezes para o mesmo turno
+_flushed_turns: set[str] = set()
+
 router = APIRouter()
 
 
@@ -87,24 +91,40 @@ async def end_turn(
     # Garante que o app_id vem sempre da key
     ctx.app_id = auth.app_id
 
+    # Idempotência — se já fez flush, ignora silenciosamente
+    if turn_id in _flushed_turns:
+        print(f"[TurnEnd] Turn [{turn_id[:8]}] — already flushed, ignoring duplicate call")
+        return {
+            "turn_id": turn_id,
+            "status":  "already_flushed",
+            "message": "Turn was already flushed.",
+        }
+
     accumulator = get_accumulator()
     bucket = accumulator._buckets.get(turn_id)
 
     if bucket is None:
         # Balde não existe — já foi flushed ou nunca foi aberto
         # Devolvemos 200 para ser idempotente — o agente não precisa de se preocupar
-        #print(f"[TurnEnd] Turn [{turn_id[:8]}] — bucket not found (already flushed or never opened)")
+        print(f"[TurnEnd] Turn [{turn_id[:8]}] — bucket not found (already flushed or never opened)")
+        _flushed_turns.add(turn_id)
         return {
             "turn_id": turn_id,
             "status":  "already_flushed",
             "message": "Turn was already flushed or never opened.",
         }
 
-    # print(
-    #     f"[TurnEnd] Turn [{turn_id[:8]}] end declared by agent "
-    #     f"app={auth.app_id} reason={body.reason} "
-    #     f"tokens={bucket.total_tokens} llm_calls={bucket.llm_calls_count}"
-    # )
+    # Marca como flushed ANTES de lançar a task — evita race condition
+    _flushed_turns.add(turn_id)
+    # Limpa o set periodicamente para não crescer indefinidamente (max 10000)
+    if len(_flushed_turns) > 10000:
+        _flushed_turns.clear()
+
+    print(
+        f"[TurnEnd] Turn [{turn_id[:8]}] end declared by agent "
+        f"app={auth.app_id} reason={body.reason} "
+        f"tokens={bucket.total_tokens} llm_calls={bucket.llm_calls_count}"
+    )
 
     # Força flush assíncrono — não bloqueia o agente
     _create_flush_task(turn_id)

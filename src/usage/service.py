@@ -85,6 +85,14 @@ async def record_turn_usage(
     truncated_msg   = (user_message or "")[:500].strip() or "(empty)"
     meta_json       = json.dumps(meta or {})
 
+    # Não gravar se não há tokens reais e a fonte é estimativa do router
+    # Evita registos duplicados quando o endpoint /turns/{id}/end é chamado
+    # múltiplas vezes para o mesmo turno
+    source = (meta or {}).get("source", "")
+    if total_tokens == 0 and source == "router_estimate_fallback":
+        print(f"[Usage] Skipping zero-token router_estimate_fallback record for turn [{turn_id[:8]}]")
+        return
+
     try:
         pool = _get_pool()
         async with pool.acquire() as conn:
@@ -107,6 +115,7 @@ async def record_turn_usage(
                     $17, $18, $19,
                     $20, $21::jsonb
                 )
+                ON CONFLICT (turn_id) DO NOTHING
                 """,
                 turn_id,
                 app_id, chat_session_id, user_id, user_name, user_email,
@@ -117,7 +126,7 @@ async def record_turn_usage(
                 tool_calls_count, meta_json,
             )
         logger.info(
-            "Turn recorded [%s] app=%s model=%s tokens=%d cost=$%.6f source=%s",
+            "Turno registado [%s] app=%s model=%s tokens=%d cost=$%.6f source=%s",
             turn_id[:8],
             app_id,
             model_id,
@@ -127,7 +136,7 @@ async def record_turn_usage(
         )
     except Exception as e:
         logger.warning(
-            "Failed to persist turn [%s] to Postgres: %s",
+            "Falha ao gravar turno [%s] no Postgres: %s",
             turn_id[:8],
             e,
         )
