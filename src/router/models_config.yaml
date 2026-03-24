@@ -81,6 +81,7 @@ models:
         - Financial analysis with 2-5 tool calls and some mathematical aggregation
         - Questions mentioning images, charts or visual Agiweb data
     best_for:
+      - "User or product asks for reasoning+ / stronger reasoning tier → this model (Kimi), not Claude"
       - "Multi-step 2-8 tools with Many2one: 'create a sale for BOLTHERM with products from last quote'"
       - "Cross-model aggregation: 'total invoiced this month by client and product'"
       - "Ambiguity resolution: 'assign to the BOLTHERM account manager' (needs ID lookup)"
@@ -143,15 +144,16 @@ models:
       $3.00/$15.00 per 1M tokens.
 
       USE ONLY WHEN:
-        - User explicitly requests "reasoning+" or "deep analysis" in their message
+        - User explicitly requests Claude, frontier tier, or maximum capability — NOT "reasoning+"
+          (reasoning+ in product language = Kimi K2.5, see tier reasoning+)
         - 10+ tool calls with expected self-correction and iterative re-planning
         - End-to-end project management workflows with many dependencies
         - Creation of long, polished documents (reports, proposals, contracts)
         - Context so long (>50K tokens) that other models lose coherence
         - Strategic business analysis requiring multi-dimensional reasoning
     best_for:
-      - "User explicitly asks for reasoning+: 'give me a full overview using reasoning+'"
-      - "Strategic business analysis: 'analyse Q1 performance and recommend Q2 focus areas'"
+      - "Explicit frontier: 'use Claude', 'frontier model', 'maximum capability', huge 1M context need"
+      - "Strategic business analysis that Kimi/GPT Mini cannot reliably complete"
       - "Polished document creation: 'prepare a full commercial proposal for client X'"
       - "Iterative self-correction in very long and complex agentic workflows"
     not_for: >

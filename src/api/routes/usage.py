@@ -2,8 +2,9 @@
 src/api/routes/usage.py
 
 Endpoints de leitura do centro de custos.
-GET /usage/logs   — lista de registos por turno
-GET /usage/stats  — agregados por modelo, empresa e app
+GET /usage/logs                 — lista de registos por turno
+GET /usage/stats                — agregados por modelo, empresa e app
+GET /usage/openrouter/credits   — snapshot de créditos OpenRouter (só admin; actualiza a BD)
 
 Controlo de acesso:
     - Bearer <app_key>              → só vê os logs da sua própria app (app_id forçado)
@@ -22,6 +23,7 @@ from src.gateway.bearer_schemes import usage_access_bearer
 from src.gateway.auth0_admin import Auth0AdminTokenError
 from src.gateway.config import Settings, get_settings
 from src.gateway.key_store import get_key_store
+from src.usage.openrouter_credits_state import refresh_openrouter_credits_for_api
 from src.usage.service import get_usage_logs, get_usage_stats
 
 router = APIRouter()
@@ -154,3 +156,32 @@ async def handle_get_usage_stats(
         date_from=date_from,
         date_to=date_to,
     )
+
+
+@router.get(
+    "/openrouter/credits",
+    summary="OpenRouter credits (admin)",
+    description="""
+Chama o OpenRouter **uma vez** (GET /credits), grava o resultado em `openrouter_credits_state`
+e devolve saldos em USD, `show_alert` e `checked_at`.
+
+**Só admin** (Bearer access token Auth0). Chaves de app recebem 403.
+
+`show_alert` é `true` quando `remaining_usd` ≤ `OPENROUTER_CREDITS_ALERT_THRESHOLD_USD` (default 10).
+
+Se o OpenRouter falhar, devolve o último estado guardado com `openrouter_unavailable=true` (e `stale=true` se houver linha).
+    """,
+)
+async def handle_get_openrouter_credits(
+    caller: Annotated[UsageCaller, Depends(get_usage_caller)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    if not caller.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "forbidden",
+                "message": "OpenRouter credits are only available to admin (Auth0 access token).",
+            },
+        )
+    return await refresh_openrouter_credits_for_api(settings)

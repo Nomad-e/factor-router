@@ -62,11 +62,11 @@ async def lifespan(app: FastAPI):
         settings.port,
         key_store.cache_size,
     )
-    # Inicia background task de cleanup de baldes expirados
-    cleanup_task = asyncio.create_task(_cleanup_loop())
-   # print("[Cleanup] Background cleanup task started — interval=15s TTL=30s")
+    bg_tasks: list[asyncio.Task] = [asyncio.create_task(_cleanup_loop())]
     yield
-    cleanup_task.cancel()
+    for t in bg_tasks:
+        t.cancel()
+    await asyncio.gather(*bg_tasks, return_exceptions=True)
     await key_store.shutdown()
     logger.info("FactorRouter a encerrar.")
 

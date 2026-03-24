@@ -703,15 +703,24 @@ docker exec -it router-db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 
 ## Testes
 
+Os ficheiros de teste estão em **`test/`**. Relatórios gerados (coverage HTML, logs) ficam em **`test/result/`**.
+
 ```bash
-# Instala dependências de teste
-uv sync
+# Dependências + coverage (opcional)
+uv sync --extra dev
 
-# Teste de integração básico — valida auth, headers, proxy, usage
-uv run test_gateway.py
+# Unitários (unittest) — router, créditos OpenRouter, política Claude/Kimi
+uv run python -m unittest discover -s test -v
 
-# Teste com OpenAI SDK — fluxos reais: chat, tool_calls, streaming
-uv run test_openai_sdk.py
+# Unitários + cobertura HTML + test_report.html em test/result/
+chmod +x test/run_tests.sh
+./test/run_tests.sh
+
+# Integração manual — gateway a correr (auth, headers, proxy, usage)
+uv run python test/test_gateway.py
+
+# OpenAI SDK — fluxos reais: chat, tool_calls, streaming
+uv run python test/test_openai_sdk.py
 ```
 
 ### Configuração dos testes

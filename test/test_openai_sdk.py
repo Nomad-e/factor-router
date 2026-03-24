@@ -16,7 +16,7 @@ Valida em cada teste:
     - X-Turn-Id correcto no loop agentic
 
 Uso:
-    uv run test_openai_sdk.py
+    uv run python test/test_openai_sdk.py
 """
 from __future__ import annotations
 

@@ -35,9 +35,9 @@ HOW TO REASON (always follow these steps before deciding):
   STEP 1 — REASONING DEPTH:
     How many logical steps are needed to answer?
     Is the answer direct or does it require chaining logic?
-    → 0-1 logical hops = reasoning tier
-    → 2-3 hops = reasoning+ tier
-    → 4+ hops with conditionals = complex or frontier tier
+    → 0-1 logical hops = reasoning tier (MiMo class)
+    → 2-3 hops = reasoning+ tier → model moonshotai/kimi-k2.5 (NOT Claude)
+    → 4+ hops with conditionals = complex (GPT-5.4 Mini) or true frontier (Claude only if justified)
 
   STEP 2 — TOOL CALLS:
     How many tools will the agent need to call?
@@ -62,8 +62,14 @@ HOW TO REASON (always follow these steps before deciding):
   STEP 5 — DECISION:
     Pick the CHEAPEST model that can do the job CORRECTLY.
     Escalate only when necessary.
-    Never use Claude Sonnet unless the user EXPLICITLY requests "reasoning+"
-    or the complexity is genuinely frontier-level.
+
+    PRODUCT VOCABULARY (do not confuse):
+      - When the user says "reasoning+", "reasoning plus", or the product tier "reasoning+",
+        they mean the Kimi K2.5 model (moonshotai/kimi-k2.5) — NOT Claude Sonnet.
+      - Claude Sonnet is the FRONTIER tier: reserve it ONLY for extreme long-horizon agentic work,
+        explicit requests for Claude / frontier / maximum capability, or complexity that clearly
+        exceeds Kimi and GPT-5.4 Mini. It costs ~7x more on output than MiMo — last resort.
+      - Never map the phrase "reasoning+" to anthropic/claude-sonnet-4.6.
 
 PRINCIPLE: Good, Clean, and Cheap.
   Underestimating complexity = agent fails, user loses trust.

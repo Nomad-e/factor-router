@@ -28,6 +28,9 @@ Variáveis opcionais (têm default):
     LOG_LEVEL        — default info
     UPSTREAM_TIMEOUT — default 120 (segundos)
     UPSTREAM_URL     — default https://openrouter.ai/api/v1
+    ACCUMULATOR_IDLE_TTL_SECONDS — inatividade máxima do balde (ver accumulator)
+    OPENROUTER_MANAGEMENT_API_KEY (opcional), OPENROUTER_CREDITS_ALERT_THRESHOLD_USD — ver openrouter_credits.py
+    GATEWAY_PREMIUM_MODEL + ALLOWLIST + FALLBACK — Claude só para alguns users; outros → Kimi (default)
 """
 from __future__ import annotations
 
@@ -59,6 +62,41 @@ class Settings(BaseSettings):
         default=120,
         description="Timeout em segundos para calls ao upstream",
     )
+    openrouter_management_api_key: Optional[str] = Field(
+        default=None,
+        description=(
+            "Opcional: key com permissão para GET /api/v1/credits (management). "
+            "Se vazio, usa OPENROUTER_API_KEY."
+        ),
+    )
+    openrouter_credits_alert_threshold_usd: float = Field(
+        default=10.0,
+        ge=0,
+        description=(
+            "Em GET /usage/openrouter/credits: show_alert=true quando remaining_usd <= este valor. "
+            "Créditos OpenRouter são em USD (≈ USD para efeitos de UI)."
+        ),
+    )
+
+    # ── política de modelo (opcional) ─────────────────────────────────────
+    gateway_premium_model: str = Field(
+        default="",
+        description=(
+            "Model_id (ex. anthropic/claude-sonnet-4.6) reservado: só X-User-Id em "
+            "GATEWAY_PREMIUM_MODEL_USER_ALLOWLIST pode usá-lo. Vazio = desligado."
+        ),
+    )
+    gateway_premium_model_user_allowlist: str = Field(
+        default="",
+        description="Lista separada por vírgulas de valores de X-User-Id permitidos no modelo premium.",
+    )
+    gateway_premium_model_fallback: str = Field(
+        default="moonshotai/kimi-k2.5",
+        description=(
+            "Quando o router escolhe GATEWAY_PREMIUM_MODEL mas X-User-Id não está na allowlist, "
+            "usa este model_id (tipicamente Kimi / reasoning+)."
+        ),
+    )
 
     # ── base de dados ─────────────────────────────────────────────────────
     database_url: str = Field(
@@ -85,6 +123,19 @@ class Settings(BaseSettings):
         default=0,
         ge=0,
         description="Margem em segundos para exp (clock skew)",
+    )
+
+    # ── acumulador de tokens (balde por turno) ────────────────────────────
+    accumulator_idle_ttl_seconds: int = Field(
+        default=30,
+        ge=15,
+        le=86400,
+        description=(
+            "Segundos sem actividade no balde antes do cleanup gravar (fallback). "
+            "Deve ser maior que a maior pausa esperada entre calls ao LLM no mesmo turno "
+            "(ex.: tools lentas). Turnos de 1h com iterações frequentes: default OK; "
+            "com pausas de vários minutos: aumentar (ex. 600)."
+        ),
     )
 
     # ── servidor ──────────────────────────────────────────────────────────

@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.gateway.accumulator import get_accumulator
 from src.gateway.config import Settings
+from src.gateway.model_policy import apply_premium_model_policy
 from src.gateway.openai_message_content import flatten_openai_message_content
 from src.router.router import route as router_route
 
@@ -439,6 +440,7 @@ async def handle_chat_completions(
 
         router_result = await router_route(user_message)
         model_id = router_result.model_id
+        model_id = apply_premium_model_policy(settings, ctx, model_id)
 
         await accumulator.open(
             ctx=ctx,
@@ -463,6 +465,15 @@ async def handle_chat_completions(
         print(
             f"Turno em curso [{ctx.turn_id[:8]}] call #{call_num} → model={model_id} (router ignorado)",
         )
+
+    # Novo POST no mesmo turno → marca actividade cedo (reduz janela em que o cleanup
+    # pode ganhar corrida antes do record() no fim do stream).
+    await accumulator.touch_activity(ctx.turn_id)
+
+    resolved = apply_premium_model_policy(settings, ctx, model_id)
+    if resolved != model_id:
+        await accumulator.set_bucket_model_id(ctx.turn_id, resolved)
+        model_id = resolved
 
     # ── 3. Prepara body para o upstream ─────────────────────────────────────
     upstream_body = {

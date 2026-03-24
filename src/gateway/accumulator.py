@@ -36,11 +36,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Inatividade máxima (segundos) antes do cleanup gravar o balde sem flush explícito.
-# Conta desde o *último* record() (fim de um call ao LLM), não desde a abertura do turno —
-# turnos longos (vários minutos, muitas tools) continuam válidos enquanto houver actividade.
-# Protege contra turn_ids abandonados (crash, rede, agente pendurado).
-_TTL_SECONDS = 30   # 30s sem nenhum call completado → considera abandonado
+# TTL efectivo: Settings.accumulator_idle_ttl_seconds (env ACCUMULATOR_IDLE_TTL_SECONDS).
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -90,7 +86,10 @@ class TurnBucket:
 
     @property
     def is_expired(self) -> bool:
-        return (time.monotonic() - self.last_activity_at) > _TTL_SECONDS
+        from src.gateway.config import get_settings
+
+        ttl = get_settings().accumulator_idle_ttl_seconds
+        return (time.monotonic() - self.last_activity_at) > ttl
 
     @property
     def source(self) -> str:
@@ -235,6 +234,13 @@ class TurnAccumulator:
             bucket = self._buckets.get(turn_id)
             if bucket is not None:
                 bucket.last_activity_at = time.monotonic()
+
+    async def set_bucket_model_id(self, turn_id: str, model_id: str) -> None:
+        """Actualiza o model_id do balde (ex.: downgrade Sonnet → Kimi após política)."""
+        async with self._lock:
+            bucket = self._buckets.get(turn_id)
+            if bucket is not None:
+                bucket.model_id = model_id
 
     async def flush(self, turn_id: str) -> dict | None:
         """

@@ -1,3 +1,12 @@
+# Saída de testes / coverage (gerado por test/run_tests.sh)
+test/result/*
+!test/result/.gitkeep
+
+# Legado na raiz (se existir)
+htmlcov/
+.coverage
+/test_report.html
+
 # Python-generated files
 __pycache__/
 *.py[oc]

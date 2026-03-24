@@ -13,7 +13,7 @@ Testa:
     6. Verificação do registo de custos em /usage/logs
 
 Uso:
-    python test_gateway.py
+    uv run python test/test_gateway.py
 
 Configurar as variáveis no topo do ficheiro antes de correr.
 """
