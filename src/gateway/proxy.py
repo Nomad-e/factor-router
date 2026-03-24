@@ -28,12 +28,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.gateway.accumulator import get_accumulator
 from src.gateway.config import Settings
-from src.gateway.model_policy import apply_premium_model_policy
+from src.gateway.model_policy import (
+    apply_premium_model_policy,
+    cap_model_for_low_openrouter_credit,
+)
 from src.gateway.openai_message_content import flatten_openai_message_content
 from src.router.router import route as router_route
+from src.usage.openrouter_credits_state import read_remaining_usd_snapshot
 
 if TYPE_CHECKING:
     from src.gateway.context import GatewayContext
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers — extração de tokens
@@ -413,6 +419,23 @@ async def handle_chat_completions(
     is_stream: bool = bool(body.get("stream", False))
 
     # ── 2. Decide model_id ───────────────────────────────────────────────────
+    budget_thr = settings.openrouter_router_budget_threshold_usd
+    if budget_thr is None:
+        budget_thr = float(settings.openrouter_credits_alert_threshold_usd)
+    else:
+        budget_thr = float(budget_thr)
+
+    openrouter_balance_low = False
+    if settings.openrouter_router_budget_enabled:
+        snap_remaining = await read_remaining_usd_snapshot()
+        if snap_remaining is not None and snap_remaining <= budget_thr:
+            openrouter_balance_low = True
+            logger.info(
+                "[Router] Modo económico OpenRouter (remaining_usd=%.4f <= %.4f)",
+                snap_remaining,
+                budget_thr,
+            )
+
     accumulator = get_accumulator()
     model_id = await accumulator.get_model_id_if_known(ctx.turn_id)
 
@@ -438,9 +461,16 @@ async def handle_chat_completions(
         if not user_message:
             user_message = flatten_openai_message_content(ctx.user_message)
 
-        router_result = await router_route(user_message)
+        router_result = await router_route(
+            user_message,
+            openrouter_balance_low=openrouter_balance_low,
+        )
         model_id = router_result.model_id
         model_id = apply_premium_model_policy(settings, ctx, model_id)
+        model_id = cap_model_for_low_openrouter_credit(
+            model_id,
+            balance_low=openrouter_balance_low,
+        )
 
         await accumulator.open(
             ctx=ctx,
@@ -474,6 +504,14 @@ async def handle_chat_completions(
     if resolved != model_id:
         await accumulator.set_bucket_model_id(ctx.turn_id, resolved)
         model_id = resolved
+
+    capped = cap_model_for_low_openrouter_credit(
+        model_id,
+        balance_low=openrouter_balance_low,
+    )
+    if capped != model_id:
+        await accumulator.set_bucket_model_id(ctx.turn_id, capped)
+        model_id = capped
 
     # ── 3. Prepara body para o upstream ─────────────────────────────────────
     upstream_body = {

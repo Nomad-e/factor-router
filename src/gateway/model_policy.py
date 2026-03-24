@@ -66,3 +66,19 @@ def apply_premium_model_policy(settings: "Settings", ctx: "GatewayContext", mode
         ctx.user_id,
     )
     return fb
+
+
+def cap_model_for_low_openrouter_credit(model_id: str, *, balance_low: bool) -> str:
+    """
+    Com saldo OpenRouter baixo (snapshot BD), não usar tiers complex/frontier — desce para Kimi.
+    Corre depois do router e de apply_premium_model_policy.
+    """
+    if not balance_low:
+        return model_id
+    from src.router.router import get_model_info
+
+    info = get_model_info(model_id)
+    tier = (info or {}).get("tier")
+    if tier in ("complex", "frontier"):
+        return "moonshotai/kimi-k2.5"
+    return model_id

@@ -29,7 +29,7 @@ Variáveis opcionais (têm default):
     UPSTREAM_TIMEOUT — default 120 (segundos)
     UPSTREAM_URL     — default https://openrouter.ai/api/v1
     ACCUMULATOR_IDLE_TTL_SECONDS — inatividade máxima do balde (ver accumulator)
-    OPENROUTER_MANAGEMENT_API_KEY (opcional), OPENROUTER_CREDITS_ALERT_THRESHOLD_USD — ver openrouter_credits.py
+    OPENROUTER_MANAGEMENT_API_KEY (opcional), OPENROUTER_CREDITS_* , OPENROUTER_ROUTER_BUDGET_* — créditos / router económico
     GATEWAY_PREMIUM_MODEL + ALLOWLIST + FALLBACK — Claude só para alguns users; outros → Kimi (default)
 """
 from __future__ import annotations
@@ -75,6 +75,21 @@ class Settings(BaseSettings):
         description=(
             "Em GET /usage/openrouter/credits: show_alert=true quando remaining_usd <= este valor. "
             "Créditos OpenRouter são em USD (≈ USD para efeitos de UI)."
+        ),
+    )
+    openrouter_router_budget_enabled: bool = Field(
+        default=True,
+        description=(
+            "Se true e o último snapshot em openrouter_credits_state tiver remaining_usd <= limiar "
+            "(ver openrouter_router_budget_threshold_usd), o router favorece modelos baratos e "
+            "aplica teto a tiers caros."
+        ),
+    )
+    openrouter_router_budget_threshold_usd: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Limiar (USD) para modo económico no router. None = usa openrouter_credits_alert_threshold_usd."
         ),
     )
 

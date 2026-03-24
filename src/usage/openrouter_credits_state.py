@@ -21,6 +21,27 @@ def _pool():
     return get_key_store()._pool
 
 
+async def read_remaining_usd_snapshot() -> Optional[float]:
+    """
+    Último remaining_usd gravado em openrouter_credits_state (sem chamar a API OpenRouter).
+    None se a tabela não existir, não houver linha, ou erro de BD.
+    """
+    pool = _pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT remaining_usd FROM openrouter_credits_state WHERE id = 1"
+            )
+    except asyncpg.UndefinedTableError:
+        return None
+    except Exception as e:
+        logger.debug("[openrouter_credits_state] read_remaining_usd_snapshot: %s", e)
+        return None
+    if row is None:
+        return None
+    return float(row["remaining_usd"] or 0)
+
+
 async def _read_row() -> Optional[dict[str, Any]]:
     pool = _pool()
     try:

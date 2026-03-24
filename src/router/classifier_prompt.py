@@ -85,6 +85,20 @@ AVAILABLE MODELS:
 {models_description}
 """
 
+LOW_OPENROUTER_BALANCE_BLOCK = """
+---
+OPENROUTER PREPAID BALANCE IS LOW (budget mode - act now):
+  The organization's OpenRouter credit remaining is at or below the configured threshold.
+  Minimize cost while still answering correctly:
+  - Strongly prefer xiaomi/mimo-v2-omni whenever 1-6 straightforward tool calls suffice.
+  - Use moonshotai/kimi-k2.5 only when Many2one resolution or multi-step synthesis clearly needs it.
+  - Do NOT pick openai/gpt-5.4-mini unless incorrect output would cause serious business harm
+    AND MiMo/Kimi are clearly insufficient for the workflow.
+  - Do NOT pick anthropic/claude-sonnet-4.6 unless the user explicitly asks for Claude, Sonnet,
+    or "frontier" / maximum capability by name.
+---
+"""
+
 # User prompt — inglês, inclui estimativa de tokens
 CLASSIFIER_USER_PROMPT = """User message: "{user_message}"
 
@@ -157,6 +171,8 @@ def build_classifier_prompt(
     default_model: str,
     estimated_input_tokens: int = 0,
     estimated_output_tokens: int = 0,
+    *,
+    openrouter_balance_low: bool = False,
 ) -> tuple[str, str]:
     """
     Constrói o system prompt e o user prompt para o classificador Ollama.
@@ -177,6 +193,8 @@ def build_classifier_prompt(
         default_model=default_model,
         models_description=models_desc,
     )
+    if openrouter_balance_low:
+        system = system + "\n" + LOW_OPENROUTER_BALANCE_BLOCK.strip() + "\n"
 
     user = CLASSIFIER_USER_PROMPT.format(
         user_message=user_message,

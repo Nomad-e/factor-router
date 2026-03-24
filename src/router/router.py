@@ -108,7 +108,12 @@ def _classifier_uses_openai_path() -> bool:
 
 
 async def _call_classifier(
-    user_message: str, est_in: int, est_out: int, base: str
+    user_message: str,
+    est_in: int,
+    est_out: int,
+    base: str,
+    *,
+    openrouter_balance_low: bool = False,
 ) -> tuple[str, int, int, Optional[float]]:
     system_prompt, user_prompt = build_classifier_prompt(
         user_message=user_message,
@@ -116,6 +121,7 @@ async def _call_classifier(
         default_model=_DEFAULT_MODEL,
         estimated_input_tokens=est_in,
         estimated_output_tokens=est_out,
+        openrouter_balance_low=openrouter_balance_low,
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -180,7 +186,7 @@ def _parse_model_from_response(raw: str) -> tuple[str, Optional[str]]:
         return _DEFAULT_MODEL, "parse_error"
 
 
-async def route(user_message: Any) -> RouterResult:
+async def route(user_message: Any, *, openrouter_balance_low: bool = False) -> RouterResult:
     """
     Given the user message, returns the model to use.
     Accepta str ou content OpenAI multimodal (lista de partes).
@@ -212,7 +218,11 @@ async def route(user_message: Any) -> RouterResult:
 
     try:
         content, inp, out, duration_ms = await _call_classifier(
-            user_message, est_in, est_out, base
+            user_message,
+            est_in,
+            est_out,
+            base,
+            openrouter_balance_low=openrouter_balance_low,
         )
         model_id, fallback = _parse_model_from_response(content)
         logger.info("[Router] '%s...' -> %s (est ~%d tokens, clf in=%d out=%d, %sms)",
