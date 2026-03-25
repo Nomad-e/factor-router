@@ -57,8 +57,8 @@ class TestPremiumModelPolicy(unittest.TestCase):
     def test_non_premium_model_unchanged(self) -> None:
         s = _settings()
         ctx = _ctx("anyone")
-        out = apply_premium_model_policy(s, ctx, "xiaomi/mimo-v2-flash")
-        self.assertEqual(out, "xiaomi/mimo-v2-flash")
+        out = apply_premium_model_policy(s, ctx, "qwen/qwen3.5-397b-a17b")
+        self.assertEqual(out, "qwen/qwen3.5-397b-a17b")
 
     def test_premium_user_on_allowlist_keeps_claude(self) -> None:
         s = _settings(allowlist="allowed-user,foo")

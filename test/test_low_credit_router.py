@@ -31,8 +31,8 @@ class TestCapLowCredit(unittest.TestCase):
 
     def test_reasoning_unchanged(self) -> None:
         self.assertEqual(
-            cap_model_for_low_openrouter_credit("xiaomi/mimo-v2-omni", balance_low=True),
-            "xiaomi/mimo-v2-omni",
+            cap_model_for_low_openrouter_credit("qwen/qwen3.5-397b-a17b", balance_low=True),
+            "qwen/qwen3.5-397b-a17b",
         )
 
     def test_reasoning_plus_unchanged(self) -> None:
@@ -46,8 +46,8 @@ class TestClassifierBudgetPrompt(unittest.TestCase):
     def test_low_balance_appends_block(self) -> None:
         sys_low, _ = build_classifier_prompt(
             user_message="hi",
-            models=[{"id": "xiaomi/mimo-v2-omni", "tier": "reasoning", "pricing": {}, "description": "x"}],
-            default_model="xiaomi/mimo-v2-omni",
+            models=[{"id": "qwen/qwen3.5-397b-a17b", "tier": "reasoning", "pricing": {}, "description": "x"}],
+            default_model="qwen/qwen3.5-397b-a17b",
             openrouter_balance_low=True,
         )
         self.assertIn("OPENROUTER PREPAID BALANCE IS LOW", sys_low)
@@ -55,8 +55,8 @@ class TestClassifierBudgetPrompt(unittest.TestCase):
     def test_normal_no_block(self) -> None:
         sys_ok, _ = build_classifier_prompt(
             user_message="hi",
-            models=[{"id": "xiaomi/mimo-v2-omni", "tier": "reasoning", "pricing": {}, "description": "x"}],
-            default_model="xiaomi/mimo-v2-omni",
+            models=[{"id": "qwen/qwen3.5-397b-a17b", "tier": "reasoning", "pricing": {}, "description": "x"}],
+            default_model="qwen/qwen3.5-397b-a17b",
             openrouter_balance_low=False,
         )
         self.assertNotIn("OPENROUTER PREPAID BALANCE IS LOW", sys_ok)

@@ -53,7 +53,7 @@ Em **cada** POST ao mesmo turno (incluindo chamadas subsequentes):
 ## Classificador (Ollama)
 
 - **Prompt base:** `CLASSIFIER_SYSTEM_PROMPT` + `CLASSIFIER_USER_PROMPT`, construídos por `build_classifier_prompt()` em `src/router/classifier_prompt.py`.
-- **Modo baixo saldo:** com `openrouter_balance_low=True`, concatena-se `LOW_OPENROUTER_BALANCE_BLOCK` ao *system* (inglês), com regras explícitas: preferir MiMo, reservar Kimi para casos que o exijam, restringir GPT‑5.4 Mini e Claude exceto pedido explícito do utilizador.
+- **Modo baixo saldo:** com `openrouter_balance_low=True`, concatena-se `LOW_OPENROUTER_BALANCE_BLOCK` ao *system* (inglês), com regras explícitas: preferir o modelo default do tier *reasoning* (`qwen/qwen3.5-397b-a17b` em `models_config.yaml`), reservar Kimi quando necessário, restringir GPT‑5.4 Mini e Claude exceto pedido explícito do utilizador.
 
 O classificador continua a devolver JSON `{"model": "..."}`; o *parsing* e fallbacks mantêm-se em `src/router/router.py` (`route`, `_call_classifier`, `_parse_model_from_response`).
 

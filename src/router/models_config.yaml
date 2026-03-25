@@ -11,30 +11,31 @@
 #   - What is the cost of an error?
 #
 # ESCALATION LADDER (output cost, cheapest to most capable):
-#   MiMo-V2-Omni   $2.00/M  — direct ERP queries, 1-5 tool calls
-#   Kimi K2.5       $2.20/M  — multi-step, Many2one, 2-8 tool calls
-#   GPT-5.4 Mini    $4.50/M  — complex workflows, critical quality, 3-12 tools
-#   Claude Sonnet   $15.0/M  — long-horizon agentic, self-correction, LAST RESORT
+#   Qwen3.5 397B-A17B  $2.34/M  — direct ERP queries, 1-5 tool calls (default)
+#   Kimi K2.5          $2.20/M  — multi-step, Many2one, 2-8 tool calls
+#   GPT-5.4 Mini       $4.50/M  — complex workflows, critical quality, 3-12 tools
+#   Claude Sonnet      $15.0/M  — long-horizon agentic, self-correction, LAST RESORT
 # =============================================================================
 
 models:
 
   # ---------------------------------------------------------------------------
-  # TIER 1 — MiMo-V2-Omni (DEFAULT)
-  # Cheapest, fast, strong at tool calling and structured reasoning
+  # TIER 1 — Qwen3.5 397B-A17B (DEFAULT)
+  # Vision-language, MoE + linear attention; strong code, agents, tool use; 262K context
   # ---------------------------------------------------------------------------
-  - id: "xiaomi/mimo-v2-omni"
+  - id: "qwen/qwen3.5-397b-a17b"
     tier: "reasoning"
     task_type: "reasoning"
     context_window: 262144
     pricing:
-      input_per_1m_tokens:  "$0.40"
-      output_per_1m_tokens: "$2.00"
+      input_per_1m_tokens:  "$0.39"
+      output_per_1m_tokens: "$2.34"
     description: >
-      MiMo-V2-Omni by Xiaomi — frontier omni-modal model with unified architecture
-      for text, image, video and audio. Combines strong agentic capability with visual
-      grounding, multi-step planning, tool use and code execution.
-      262K context. $0.40/$2.00 per 1M tokens.
+      Qwen3.5 397B-A17B by Qwen — native vision-language model on a hybrid architecture
+      (linear attention + sparse mixture-of-experts) for higher inference efficiency.
+      State-of-the-art across language understanding, logical reasoning, code generation,
+      agent tasks, image and video understanding, and GUI interactions. Strong code and
+      agent generalization. 262,144 context. $0.39/$2.34 per 1M tokens (OpenRouter).
 
       PATTERNS FOR THIS MODEL:
         - User asks a direct question answerable from the ERP with 1-5 linear tool calls
@@ -45,11 +46,13 @@ models:
         - Linear reasoning — no ambiguity about what to do next
         - Questions about the current Agiweb page the user is viewing
         - Normal conversation, follow-up questions, explanation requests
+        - Visual or page-grounded questions when a single-model ERP answer suffices
     best_for:
       - "Direct Agiweb queries with 1-5 linear tool calls: 'total sales this week', 'list overdue invoices for client X'"
       - "Single Agiweb model CRUD with known fields: 'update phone for contact', 'mark task as done'"
       - "Questions about the current Agiweb page or conversation context"
       - "Simple conversation, follow-up, explanations, formatting of existing data"
+      - "Agent-style tool use and code-oriented steps when complexity stays in the reasoning tier"
     not_for: >
       Queries requiring comparison across multiple periods or entities,
       conditional workflows, deep Many2one resolution,
@@ -122,7 +125,7 @@ models:
       - "Complex multi-module reports: 'full overview of everything that happened today'"
       - "Long context requiring coherence: conversation with 10+ turns and interdependent decisions"
     not_for: >
-      Tasks that MiMo or Kimi can handle. Escalate only when necessary.
+      Tasks that Qwen (reasoning tier) or Kimi can handle. Escalate only when necessary.
       Do not use as default — reserve for genuinely complex or high-stakes requests.
 
 
@@ -157,33 +160,33 @@ models:
       - "Polished document creation: 'prepare a full commercial proposal for client X'"
       - "Iterative self-correction in very long and complex agentic workflows"
     not_for: >
-      ANY task that MiMo, Kimi or GPT-5.4 Mini can handle correctly.
-      Costs 7.5x more than MiMo on output tokens. ABSOLUTE LAST RESORT.
+      ANY task that Qwen (reasoning), Kimi or GPT-5.4 Mini can handle correctly.
+      Costs ~6.4x more than Qwen 397B-A17B on output tokens. ABSOLUTE LAST RESORT.
       Only escalate when the user explicitly requests it or complexity is genuinely frontier.
 
 
 # =============================================================================
 # FALLBACK MODEL
 # Used when the classifier cannot determine the tier with confidence.
-# MiMo-V2-Omni — cheapest, 262K context, strong at tool calling.
+# Qwen3.5 397B-A17B — default reasoning tier, 262K context, strong agents/code/VL.
 # =============================================================================
-default_model: "xiaomi/mimo-v2-omni"
+default_model: "qwen/qwen3.5-397b-a17b"
 
 
 # =============================================================================
-# PRICING SUMMARY (OpenRouter — March 2026)
+# PRICING SUMMARY (OpenRouter — Feb 2026 listing)
 # =============================================================================
 #
-#  Model                              | Context | Input /1M | Output /1M | Ratio vs MiMo
-#  -----------------------------------|---------|-----------|------------|---------------
-#  xiaomi/mimo-v2-omni                | 262K    | $0.40     | $2.00      | 1x   (baseline)
-#  moonshotai/kimi-k2.5               | 262K    | $0.45     | $2.20      | 1.1x
-#  openai/gpt-5.4-mini                | 400K    | $0.75     | $4.50      | 2.25x
-#  anthropic/claude-sonnet-4.6        | 1M      | $3.00     | $15.00     | 7.5x (last resort)
+#  Model                              | Context | Input /1M | Output /1M | Ratio vs Qwen (out)
+#  -----------------------------------|---------|-----------|------------|--------------------
+#  qwen/qwen3.5-397b-a17b             | 262K    | $0.39     | $2.34      | 1x   (baseline)
+#  moonshotai/kimi-k2.5               | 262K    | $0.45     | $2.20      | 0.94x (slightly cheaper out)
+#  openai/gpt-5.4-mini                | 400K    | $0.75     | $4.50      | 1.92x
+#  anthropic/claude-sonnet-4.6        | 1M      | $3.00     | $15.00     | 6.41x (last resort)
 #
-#  EXPECTED DISTRIBUTION:
-#    80% of queries → MiMo      ($2.00 output)
-#    15% of queries → Kimi      ($2.20 output)
-#     4% of queries → GPT Mini  ($4.50 output)
-#     1% of queries → Sonnet    (explicit user request only)
+#  EXPECTED DISTRIBUTION (target):
+#    ~80% of queries → Qwen 397B-A17B  ($2.34/M output)
+#    ~15% of queries → Kimi          ($2.20/M output)
+#     ~4% of queries → GPT Mini       ($4.50/M output)
+#     ~1% of queries → Sonnet         (explicit user request only)
 # =============================================================================
