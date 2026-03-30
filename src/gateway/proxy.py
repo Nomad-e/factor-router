@@ -34,7 +34,7 @@ from src.gateway.model_policy import (
     cap_model_for_low_openrouter_credit,
 )
 from src.gateway.openai_message_content import flatten_openai_message_content
-from src.router.router import route as router_route
+from src.router.router import GATEWAY_TITLE_MODEL_ID, route as router_route
 from src.usage.openrouter_credits_state import read_remaining_usd_snapshot
 
 if TYPE_CHECKING:
@@ -229,7 +229,8 @@ async def _proxy_stream(
                         is_last_call = True
                         return
 
-                    await accumulator.touch_activity(ctx.turn_id)
+                    bid = ctx.accumulator_bucket_id
+                    await accumulator.touch_activity(bid)
                     last_stream_touch = time.monotonic()
 
                     async for raw_line in upstream.aiter_lines():
@@ -240,7 +241,7 @@ async def _proxy_stream(
                         now = time.monotonic()
                         if now - last_stream_touch >= 15:
                             last_stream_touch = now
-                            await accumulator.touch_activity(ctx.turn_id)
+                            await accumulator.touch_activity(bid)
 
                         # Passa o chunk ao agente imediatamente
                         yield (raw_line + "\n\n").encode()
@@ -289,8 +290,9 @@ async def _proxy_stream(
 
         finally:
             # Regista tokens deste call no acumulador
+            bid = ctx.accumulator_bucket_id
             await accumulator.record(
-                turn_id=ctx.turn_id,
+                turn_id=bid,
                 prompt_tokens=total_prompt,
                 completion_tokens=total_completion,
                 tool_calls_in_call=total_tool_calls,
@@ -298,7 +300,7 @@ async def _proxy_stream(
             # finish_reason=stop → turno terminou → flush assíncrono
             # finish_reason=tool_calls → agente vai fazer outro call → NÃO flush
             if is_last_call:
-                _create_flush_task(ctx.turn_id)
+                _create_flush_task(bid)
 
     return StreamingResponse(
         generate(),
@@ -334,9 +336,10 @@ async def _proxy_json(
     Aguarda resposta completa, extrai tokens, faz flush.
     """
     accumulator = get_accumulator()
-    await accumulator.touch_activity(ctx.turn_id)
+    bid = ctx.accumulator_bucket_id
+    await accumulator.touch_activity(bid)
     touch_task = asyncio.create_task(
-        _periodic_bucket_touch(ctx.turn_id, accumulator)
+        _periodic_bucket_touch(bid, accumulator)
     )
 
     try:
@@ -369,7 +372,7 @@ async def _proxy_json(
         # )
         # Força flush mesmo em erro — tokens foram consumidos pelo provider
         # O balde pode ter tokens de calls anteriores do mesmo turno agentic
-        _create_flush_task(ctx.turn_id)
+        _create_flush_task(bid)
         return JSONResponse(
             status_code=upstream.status_code,
             content=upstream.json(),
@@ -379,7 +382,7 @@ async def _proxy_json(
     p, c, t = _extract_usage_from_response(response_data)
 
     await accumulator.record(
-        turn_id=ctx.turn_id,
+        turn_id=bid,
         prompt_tokens=p,
         completion_tokens=c,
         tool_calls_in_call=t,
@@ -393,7 +396,7 @@ async def _proxy_json(
         .get("finish_reason", "stop")
     )
     if finish_reason in ("stop", "end_turn", "length"):
-        _create_flush_task(ctx.turn_id)
+        _create_flush_task(bid)
 
     return JSONResponse(content=response_data)
 
@@ -412,8 +415,9 @@ async def handle_chat_completions(
 
     1. Lê e valida o body
     2. Decide model_id:
-       - X-Turn-Id novo     → chama router UMA VEZ → abre balde
-       - X-Turn-Id existente → usa model_id do balde (router ignorado)
+       - X-Conversation-Id: generate-title → modelo fixo (sem router), balde separado por turno
+       - X-Turn-Id novo (chat) → chama router UMA VEZ → abre balde
+       - mesmo balde (chat ou título) → usa model_id do balde (router ignorado)
     3. Prepara body para o upstream (injeta model_id, stream_options)
     4. Delega para _proxy_stream ou _proxy_json
     """
@@ -499,81 +503,75 @@ async def handle_chat_completions(
             )
 
     accumulator = get_accumulator()
-    model_id = await accumulator.get_model_id_if_known(ctx.turn_id)
+    bid = ctx.accumulator_bucket_id
+    is_title = ctx.is_title_generation_request
+
+    model_id = await accumulator.get_model_id_if_known(bid)
 
     if model_id is None:
-        # Primeiro call deste turno → chama router UMA VEZ
-        # print(
-        #     "Turno novo [%s] — a chamar router | app=%s session=%s",
-        #     ctx.turn_id[:8],
-        #     ctx.app_id,
-        #     ctx.session_id,
-        # )
+        if is_title:
+            model_id = GATEWAY_TITLE_MODEL_ID
+            await accumulator.open(
+                ctx=ctx,
+                model_id=model_id,
+                router_est_input_tokens=0,
+                router_est_output_tokens=0,
+            )
+        else:
+            # Primeiro call deste turno → chama router UMA VEZ
+            raw_content = next(
+                (
+                    m.get("content")
+                    for m in reversed(messages)
+                    if m.get("role") == "user"
+                ),
+                None,
+            )
+            user_message = flatten_openai_message_content(raw_content)
+            if not user_message:
+                user_message = flatten_openai_message_content(ctx.user_message)
 
-        # Extrai a mensagem do utilizador (str ou partes multimodais OpenAI)
-        raw_content = next(
-            (
-                m.get("content")
-                for m in reversed(messages)
-                if m.get("role") == "user"
-            ),
-            None,
-        )
-        user_message = flatten_openai_message_content(raw_content)
-        if not user_message:
-            user_message = flatten_openai_message_content(ctx.user_message)
+            router_result = await router_route(
+                user_message,
+                openrouter_balance_low=openrouter_balance_low,
+            )
+            model_id = router_result.model_id
+            model_id = apply_premium_model_policy(settings, ctx, model_id)
+            model_id = cap_model_for_low_openrouter_credit(
+                model_id,
+                balance_low=openrouter_balance_low,
+            )
 
-        router_result = await router_route(
-            user_message,
-            openrouter_balance_low=openrouter_balance_low,
+            await accumulator.open(
+                ctx=ctx,
+                model_id=model_id,
+                router_est_input_tokens=router_result.estimated_input_tokens,
+                router_est_output_tokens=router_result.estimated_output_tokens,
+            )
+
+    else:
+        bucket = accumulator._buckets.get(bid)
+        call_num = (bucket.llm_calls_count + 1) if bucket else "?"
+        print(
+            f"Turno em curso [{ctx.turn_id[:8]}] bucket={bid[:24]}... "
+            f"call #{call_num} → model={model_id} (router ignorado)",
         )
-        model_id = router_result.model_id
-        model_id = apply_premium_model_policy(settings, ctx, model_id)
-        model_id = cap_model_for_low_openrouter_credit(
+
+    await accumulator.touch_activity(bid)
+
+    if not is_title:
+        resolved = apply_premium_model_policy(settings, ctx, model_id)
+        if resolved != model_id:
+            await accumulator.set_bucket_model_id(bid, resolved)
+            model_id = resolved
+
+        capped = cap_model_for_low_openrouter_credit(
             model_id,
             balance_low=openrouter_balance_low,
         )
-
-        await accumulator.open(
-            ctx=ctx,
-            model_id=model_id,
-            router_est_input_tokens=router_result.estimated_input_tokens,
-            router_est_output_tokens=router_result.estimated_output_tokens,
-        )
-
-        # print(
-        #     "Turno [%s] app=%s company=%s → model=%s (est ~%d tokens)",
-        #     ctx.turn_id[:8],
-        #     ctx.app_id,
-        #     ctx.company_id,
-        #     model_id,
-        #     router_result.estimated_input_tokens + router_result.estimated_output_tokens,
-        # )
-
-    else:
-        # Call seguinte do mesmo turno → router NÃO é chamado
-        bucket = accumulator._buckets.get(ctx.turn_id)
-        call_num = (bucket.llm_calls_count + 1) if bucket else "?"
-        print(
-            f"Turno em curso [{ctx.turn_id[:8]}] call #{call_num} → model={model_id} (router ignorado)",
-        )
-
-    # Novo POST no mesmo turno → marca actividade cedo (reduz janela em que o cleanup
-    # pode ganhar corrida antes do record() no fim do stream).
-    await accumulator.touch_activity(ctx.turn_id)
-
-    resolved = apply_premium_model_policy(settings, ctx, model_id)
-    if resolved != model_id:
-        await accumulator.set_bucket_model_id(ctx.turn_id, resolved)
-        model_id = resolved
-
-    capped = cap_model_for_low_openrouter_credit(
-        model_id,
-        balance_low=openrouter_balance_low,
-    )
-    if capped != model_id:
-        await accumulator.set_bucket_model_id(ctx.turn_id, capped)
-        model_id = capped
+        if capped != model_id:
+            await accumulator.set_bucket_model_id(bid, capped)
+            model_id = capped
 
     # ── 3. Prepara body para o upstream ─────────────────────────────────────
     upstream_body = {

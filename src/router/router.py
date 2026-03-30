@@ -65,6 +65,10 @@ _MODELS        = _CONFIG["models"]
 _DEFAULT_MODEL = _CONFIG["default_model"]
 _VALID_IDS     = {m["id"] for m in _MODELS}
 
+# Modelo fixo do gateway (X-Conversation-Id: generate-title). Não está em models_config.yaml
+# para não entrar no prompt do classificador; preços só em get_model_info abaixo.
+GATEWAY_TITLE_MODEL_ID = "google/gemini-2.5-flash-lite"
+
 _BASE_CONTEXT_TOKENS = 4000
 _BASE_OUTPUT_TOKENS  = 500
 _CHARS_PER_TOKEN     = 3.5
@@ -90,6 +94,14 @@ def _parse_price(value) -> float:
 
 
 def get_model_info(model_id: str) -> Optional[dict]:
+    if model_id == GATEWAY_TITLE_MODEL_ID:
+        return {
+            "id":                   model_id,
+            "tier":                 None,
+            "context_window":       1_048_576,
+            "input_per_1m_tokens":  0.10,
+            "output_per_1m_tokens": 0.40,
+        }
     for m in _MODELS:
         if m.get("id") == model_id:
             pricing = m.get("pricing") or {}

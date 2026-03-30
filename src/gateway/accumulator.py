@@ -186,10 +186,11 @@ class TurnAccumulator:
         Se o balde já existir (agente faz 2º call do mesmo turno),
         não recria — apenas devolve o existente.
         """
+        bucket_id = ctx.accumulator_bucket_id
         async with self._lock:
-            if ctx.turn_id not in self._buckets:
-                self._buckets[ctx.turn_id] = TurnBucket(
-                    turn_id=ctx.turn_id,
+            if bucket_id not in self._buckets:
+                self._buckets[bucket_id] = TurnBucket(
+                    turn_id=bucket_id,
                     app_id=ctx.app_id,
                     session_id=ctx.session_id,
                     conversation_id=ctx.conversation_id,
@@ -203,8 +204,8 @@ class TurnAccumulator:
                     router_est_input_tokens=router_est_input_tokens,
                     router_est_output_tokens=router_est_output_tokens,
                 )
-               # print(f"[Accumulator] Bucket opened [{ctx.turn_id[:8]}] app={ctx.app_id} session={ctx.session_id} model={model_id}")
-            return self._buckets[ctx.turn_id]
+               # print(f"[Accumulator] Bucket opened [{bucket_id[:16]}] app={ctx.app_id} session={ctx.session_id} model={model_id}")
+            return self._buckets[bucket_id]
 
     async def record(
         self,

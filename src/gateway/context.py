@@ -93,6 +93,14 @@ def _validate_uuid(value: str, header_name: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Geração de título (AGIWeb / Factor Agent): mesmo POST /v1/chat/completions, sem router.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Valor exacto de X-Conversation-Id que activa modelo fixo (sem classificador).
+GENERATE_TITLE_CONVERSATION_ID = "generate-title"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GatewayContext
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -124,6 +132,21 @@ class GatewayContext:
         self.user_email      = user_email
         self.company_id      = company_id
         self.company_name    = company_name
+
+    @property
+    def is_title_generation_request(self) -> bool:
+        """True quando X-Conversation-Id é o valor reservado para título (sem router)."""
+        return (self.conversation_id or "").strip() == GENERATE_TITLE_CONVERSATION_ID
+
+    @property
+    def accumulator_bucket_id(self) -> str:
+        """
+        Chave do balde de custos. O título partilha X-Turn-Id com o chat mas precisa de
+        balde/registo separados (turn_id único em llm_usage_log).
+        """
+        if self.is_title_generation_request:
+            return f"{self.turn_id}::generate-title"
+        return self.turn_id
 
     @classmethod
     async def from_headers(

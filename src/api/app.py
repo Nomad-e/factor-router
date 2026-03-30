@@ -105,7 +105,7 @@ Todos os requests a `/v1/*` devem incluir:
 | `X-App-Id` | string | Identificador da app (ex: `severino-wa`) |
 | `X-Turn-Id` | UUID v4 | Gerado pelo agente no início de cada turno |
 | `X-Session-Id` | string | ID da sessão de chat |
-| `X-Conversation-Id` | string ou `"null"` | ID da conversa, se existir |
+| `X-Conversation-Id` | string ou `"null"` | ID da conversa. **`generate-title`** = geração de título (modelo fixo, sem router). |
 | `X-User-Message` | string | Primeiros 300 chars da mensagem do utilizador |
 | `X-User-Id` | string ou `"null"` | ID do utilizador |
 | `X-User-Name` | string ou `"null"` | Nome do utilizador |
