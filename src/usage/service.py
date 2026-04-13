@@ -80,6 +80,16 @@ async def record_turn_usage(
     model_info      = get_model_info(model_id) or {}
     input_price     = float(model_info.get("input_per_1m_tokens",  0.0))
     output_price    = float(model_info.get("output_per_1m_tokens", 0.0))
+    if (
+        not model_info
+        and (prompt_tokens > 0 or completion_tokens > 0)
+        and model_id
+    ):
+        logger.warning(
+            "[Usage] model_id=%r sem entrada em models_config.yaml — custo USD será 0. "
+            "Adiciona o modelo ao catálogo ou verifica o id devolvido pelo upstream.",
+            model_id,
+        )
     costs           = _calc_costs(prompt_tokens, completion_tokens, input_price, output_price)
 
     stored_msg = (user_message or "").strip() or "(empty)"
