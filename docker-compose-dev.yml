@@ -3,15 +3,15 @@ services:
   # ── Base de dados ──────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: router-db
+    container_name: router-db-dev
     restart: unless-stopped
     env_file:
-      - .env
+      - .env.dev
     ports:
       - "5431:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d   # corre as migrações no primeiro arranque
+      - postgres_data_dev:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -19,7 +19,7 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - factor_router_net
+      - factor_router_net_dev
 
   # ── Gateway API ────────────────────────────────────────────────────────────
   router-api:
@@ -27,10 +27,10 @@ services:
       context: .
       dockerfile: Dockerfile
     image: router-api:0.0.1
-    container_name: router-api
+    container_name: router-api-dev
     restart: unless-stopped
     env_file:
-      - .env
+      - .env.dev
     ports:
       - "8003:8003"
     depends_on:
@@ -39,15 +39,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - factor_router_net
+      - factor_router_net_dev
 
 # ── Volumes ────────────────────────────────────────────────────────────────
 volumes:
-  postgres_data:
-    name: router-db-data
+  postgres_data_dev:
+    name: router-db-data-dev
 
 # ── Network ───────────────────────────────────────────────────────────────
 networks:
-  factor_router_net:
-    name: factor_router_net
+  factor_router_net_dev:
+    name: factor_router_net_dev
     driver: bridge

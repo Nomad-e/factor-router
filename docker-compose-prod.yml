@@ -1,0 +1,53 @@
+services:
+
+  # ── Base de dados ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: router-db-prod
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    ports:
+      - "3245:5432"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - factor_router_net_prod
+
+  # ── Gateway API ────────────────────────────────────────────────────────────
+  router-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: router-api:0.0.1
+    container_name: router-api-prod
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    ports:
+      - "8004:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - factor_router_net_prod
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data_prod:
+    name: router-db-data-prod
+
+# ── Network ───────────────────────────────────────────────────────────────
+networks:
+  factor_router_net_prod:
+    name: factor_router_net_prod
+    driver: bridge
