@@ -4,6 +4,31 @@
 -- Executar:
 --   psql $DATABASE_URL -f migrations/002_llm_usage_log.sql
 
+-- Se uma execução anterior falhou, pode ficar um type composto `llm_usage_log`
+-- no catálogo sem a tabela existir. Isso faz `CREATE TABLE` falhar com:
+-- `type "llm_usage_log" already exists`.
+-- Para tornar a migração reexecutável, removemos o type apenas quando a tabela não existir.
+DO $$
+BEGIN
+  IF EXISTS (
+       SELECT 1
+         FROM pg_type t
+         JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE t.typname = 'llm_usage_log'
+          AND n.nspname = 'public'
+     )
+     AND NOT EXISTS (
+       SELECT 1
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'llm_usage_log'
+          AND c.relkind = 'r'
+          AND n.nspname = 'public'
+     ) THEN
+    EXECUTE 'DROP TYPE public.llm_usage_log';
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS llm_usage_log (
     id                  BIGSERIAL       PRIMARY KEY,
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
