@@ -26,7 +26,7 @@ from typing import AsyncIterator, TYPE_CHECKING
 
 import httpx
 from fastapi import HTTPException, Request, status
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from src.gateway.accumulator import get_accumulator
 from src.gateway.config import Settings
@@ -43,6 +43,12 @@ from src.gateway.provider_upstream import (
 from src.gateway.openai_message_content import flatten_openai_message_content
 from src.router.router import GATEWAY_TITLE_MODEL_ID, route as router_route
 from src.usage.openrouter_credits_state import read_remaining_usd_snapshot
+from src.gateway.resilience import (
+    get_circuit_breaker,
+    record_model_failure,
+    record_model_success,
+    retry_upstream_call,
+)
 
 if TYPE_CHECKING:
     from src.gateway.context import GatewayContext
@@ -267,6 +273,37 @@ async def _proxy_stream(
         last_stream_touch = 0.0
 
         work = body_for_upstream_proxy(body, upstream_target)
+        cb = get_circuit_breaker()
+        model_id = body.get("model", "unknown")
+        
+        # Check circuit breaker before attempting
+        if cb.is_open(model_id):
+            logger.warning("[Proxy] Circuit OPEN for model %s — returning 503", model_id)
+            payload = {
+                "error": "circuit_breaker_open",
+                "message": f"Model {model_id} is temporarily unavailable due to repeated failures. Try again later.",
+                "model": model_id,
+            }
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+            return
+        
+        async def _do_stream_request() -> httpx.Response:
+            client = httpx.AsyncClient(timeout=settings.upstream_timeout)
+            try:
+                response = await client.stream(
+                    "POST",
+                    upstream_target.chat_completions_url,
+                    headers=upstream_target.headers,
+                    json=work,
+                )
+                return response
+            except Exception:
+                await client.aclose()
+                raise
+        
+        # For streaming, we can't use retry_upstream_call directly because
+        # we need to handle the streaming response. We do a single attempt
+        # with circuit breaker tracking.
         try:
             async with httpx.AsyncClient(timeout=settings.upstream_timeout) as client:
                 async with client.stream(
@@ -283,6 +320,11 @@ async def _proxy_stream(
                             upstream.status_code,
                             raw_error_text,
                         )
+                        
+                        # Track failure for circuit breaker and fallback
+                        cb.record_failure(model_id)
+                        fallback = record_model_failure(model_id)
+                        
                         print(
                             "[ProxyUpstreamError] app_id=%s env=%s source=%s status=%s body=%s"
                             % (
@@ -293,8 +335,8 @@ async def _proxy_stream(
                                 error_body[:300],
                             )
                         )
-                        # Em streaming (SSE), não conseguimos mudar o status HTTP depois de abrir 200.
-                        # Enviamos um evento de erro explícito e terminamos o stream.
+                        
+                        # If we have a fallback model, include it in the error
                         payload = {
                             "error": error_code,
                             "upstream_status": upstream.status_code,
@@ -303,10 +345,16 @@ async def _proxy_stream(
                             "message": "Upstream provider returned an error.",
                             "upstream_body": raw_error_text[:500],
                         }
+                        if fallback:
+                            payload["suggested_fallback"] = fallback
+                            payload["message"] += f" Consider retrying with model: {fallback}"
+                        
                         yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
-                        # NOTA: não fazemos flush em erro — o turno pode continuar após erro transitório
-                        # O TTL cleanup ou /turns/{turn_id}/end irá gravar os tokens quando apropriado
                         return
+                    
+                    # Success — record it
+                    cb.record_success(model_id)
+                    record_model_success(model_id)
 
                     bid = ctx.accumulator_bucket_id
                     await accumulator.touch_activity(bid)
@@ -417,19 +465,64 @@ async def _proxy_json(
     )
 
     work = body_for_upstream_proxy(body, upstream_target)
-    try:
+    cb = get_circuit_breaker()
+    model_id = body.get("model", "unknown")
+    
+    # Check circuit breaker before attempting
+    if cb.is_open(model_id):
+        touch_task.cancel()
+        try:
+            await touch_task
+        except asyncio.CancelledError:
+            pass
+        logger.warning("[Proxy] Circuit OPEN for model %s — returning 503", model_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "circuit_breaker_open",
+                "message": f"Model {model_id} is temporarily unavailable due to repeated failures. Try again later.",
+                "model": model_id,
+            },
+        )
+    
+    async def _do_post() -> httpx.Response:
         async with httpx.AsyncClient(timeout=settings.upstream_timeout) as client:
-            upstream = await client.post(
+            return await client.post(
                 upstream_target.chat_completions_url,
                 headers=upstream_target.headers,
                 json=work,
             )
+    
+    try:
+        upstream = await retry_upstream_call(_do_post, max_retries=2, base_delay=1.0)
     except httpx.TimeoutException:
+        touch_task.cancel()
+        try:
+            await touch_task
+        except asyncio.CancelledError:
+            pass
+        cb.record_failure(model_id)
+        record_model_failure(model_id)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail={
                 "error": "upstream_timeout",
                 "message": f"O provider não respondeu em {settings.upstream_timeout}s.",
+            },
+        )
+    except httpx.HTTPError as e:
+        touch_task.cancel()
+        try:
+            await touch_task
+        except asyncio.CancelledError:
+            pass
+        cb.record_failure(model_id)
+        record_model_failure(model_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "upstream_unreachable",
+                "message": f"Falha ao contactar upstream: {e}",
             },
         )
     finally:
@@ -442,6 +535,11 @@ async def _proxy_json(
     if upstream.status_code >= 400:
         raw_error_text = upstream.text
         error_code = _classify_upstream_error(upstream.status_code, raw_error_text)
+        
+        # Track failure for circuit breaker and fallback
+        cb.record_failure(model_id)
+        fallback = record_model_failure(model_id)
+        
         print(
             "[ProxyUpstreamError] app_id=%s env=%s source=%s status=%s body=%s"
             % (
@@ -452,13 +550,7 @@ async def _proxy_json(
                 raw_error_text[:300],
             )
         )
-        # print(
-        #     "Upstream error %d for turn [%s]",
-        #     upstream.status_code,
-        #     ctx.turn_id[:8],
-        # )
-        # NOTA: não fazemos flush em erro — o turno pode continuar após erro transitório
-        # O TTL cleanup ou /turns/{turn_id}/end irá gravar os tokens quando apropriado
+        
         try:
             payload = upstream.json()
         except Exception:
@@ -471,11 +563,18 @@ async def _proxy_json(
                 "factor_api_key_source",
                 upstream_target.api_key_source or "unknown",
             )
+            if fallback:
+                payload["suggested_fallback"] = fallback
+                payload["message"] = payload.get("message", "") + f" Consider retrying with model: {fallback}"
         return JSONResponse(
             status_code=upstream.status_code,
             content=payload,
             headers={"X-Factor-Upstream-Env": upstream_env},
         )
+
+    # Success — record it
+    cb.record_success(model_id)
+    record_model_success(model_id)
 
     response_data = upstream.json()
     p, c, t = _extract_usage_from_response(response_data)
@@ -486,11 +585,6 @@ async def _proxy_json(
         completion_tokens=c,
         tool_calls_in_call=t,
     )
-
-    # NOTA: flush automático por finish_reason foi removido.
-    # O turno só é fechado via:
-    #   1. POST /v1/turns/{turn_id}/end (explícito, recomendado para MemGPT)
-    #   2. TTL cleanup (fallback de segurança — 15s de inatividade)
 
     return JSONResponse(
         content=response_data,
@@ -684,6 +778,21 @@ async def handle_chat_completions(
         if capped != model_id:
             await accumulator.set_bucket_model_id(bid, capped)
             model_id = capped
+        
+        # Check if this model has failed recently and should use fallback
+        from src.gateway.resilience import record_model_failure, get_fallback_model
+        cb = get_circuit_breaker()
+        if cb.is_open(model_id):
+            fallback = get_fallback_model(model_id)
+            if fallback and fallback != model_id:
+                logger.warning(
+                    "[Proxy] Model %s circuit open — using fallback %s",
+                    model_id,
+                    fallback,
+                )
+                model_id = fallback
+                upstream_body["model"] = model_id
+                await accumulator.set_bucket_model_id(bid, model_id)
 
     # FIX: Modelos Qwen/Alibaba rejeitam function.arguments vazio ou não-JSON.
     # Se o agente enviar um assistant message com tool_calls em que os argumentos são "",
@@ -964,3 +1073,130 @@ async def handle_audio_transcriptions(
         logger.warning("[AudioProxy] Falha ao registar usage turn=%s: %s", ctx.turn_id[:8], e)
 
     return response
+
+
+async def handle_audio_speech(
+    request: Request,
+    ctx: "GatewayContext",
+    settings: Settings,
+) -> Response | JSONResponse:
+    """
+    Proxy OpenAI-compatible para POST /v1/audio/speech (factor-speech / TTS).
+    Body JSON; mesmos headers X-* que o resto do gateway.
+    """
+    await _enforce_app_budget_or_raise(ctx)
+
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_content_type",
+                "message": f"Content-Type must be application/json, got: {content_type}",
+            },
+        )
+
+    try:
+        body_dict = await request.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_json",
+                "message": f"Body must be valid JSON: {e}",
+            },
+        ) from e
+
+    if not isinstance(body_dict, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_body", "message": "JSON body must be an object."},
+        )
+
+    if "model" not in body_dict:
+        body_dict["model"] = "tts-1"
+
+    text_in = str(body_dict.get("input") or "")
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.speech_upstream_timeout) as client:
+            upstream = await client.post(
+                settings.speech_upstream_url,
+                json=body_dict,
+                headers={"Content-Type": "application/json"},
+            )
+    except httpx.TimeoutException as e:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={
+                "error": "upstream_timeout",
+                "message": (
+                    f"TTS upstream did not respond within "
+                    f"{settings.speech_upstream_timeout}s."
+                ),
+            },
+        ) from e
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "upstream_unreachable",
+                "message": f"Failed to reach TTS upstream: {e}",
+            },
+        ) from e
+
+    if upstream.status_code >= 400:
+        u_ct = upstream.headers.get("content-type", "")
+        if "application/json" in u_ct:
+            try:
+                payload = upstream.json()
+            except Exception:
+                payload = {"error": "upstream_error", "message": upstream.text}
+            return JSONResponse(status_code=upstream.status_code, content=payload)
+        return JSONResponse(
+            status_code=upstream.status_code,
+            content={"error": "upstream_error", "message": upstream.text},
+        )
+
+    out_ct = upstream.headers.get("content-type", "audio/ogg")
+    audio_size = len(upstream.content or b"")
+    model_id = f"tts/{body_dict.get('model') or 'tts-1'}"
+    prompt_tokens = max(1, len(text_in) // 4)
+    completion_tokens = max(0, audio_size // 32)
+    total_tokens = prompt_tokens + completion_tokens
+    meta: dict[str, object] = {
+        "source": "speech_upstream",
+        "speech_upstream_url": settings.speech_upstream_url,
+        "audio_size_bytes": audio_size,
+        "response_format": body_dict.get("response_format", "opus"),
+    }
+
+    try:
+        from src.usage.service import record_turn_usage
+
+        await record_turn_usage(
+            turn_id=ctx.accumulator_bucket_id,
+            app_id=ctx.app_id,
+            chat_session_id=ctx.session_id,
+            conversation_id=ctx.conversation_id,
+            user_message=ctx.user_message or "(tts)",
+            user_id=ctx.user_id,
+            user_name=ctx.user_name,
+            user_email=ctx.user_email,
+            company_id=ctx.company_id,
+            company_name=ctx.company_name,
+            model_id=model_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tool_calls_count=0,
+            meta=meta,
+        )
+    except Exception as e:
+        logger.warning("[SpeechProxy] usage record failed turn=%s: %s", ctx.turn_id[:8], e)
+
+    return Response(
+        content=upstream.content,
+        media_type=out_ct,
+        status_code=upstream.status_code,
+    )
