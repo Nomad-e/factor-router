@@ -26,7 +26,7 @@ from typing import AsyncIterator, TYPE_CHECKING
 
 import httpx
 from fastapi import HTTPException, Request, status
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from src.gateway.accumulator import get_accumulator
 from src.gateway.config import Settings
@@ -1073,3 +1073,193 @@ async def handle_audio_transcriptions(
         logger.warning("[AudioProxy] Falha ao registar usage turn=%s: %s", ctx.turn_id[:8], e)
 
     return response
+
+
+async def handle_audio_speech(
+    request: Request,
+    ctx: "GatewayContext",
+    settings: Settings,
+) -> Response:
+    """
+    Proxy OpenAI-compatible para POST /v1/audio/speech (Text-to-Speech).
+    Exige os mesmos headers X-* para manter rastreio de custos por turno.
+    Retorna áudio binário (mp3, wav, etc.) conforme response_format.
+    """
+    await _enforce_app_budget_or_raise(ctx)
+
+    # Verificar se TTS está configurado
+    if not settings.speech_upstream_url:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "error": "tts_not_configured",
+                "message": "TTS upstream não configurado. Defina SPEECH_UPSTREAM_URL.",
+            },
+        )
+
+    # Debug: log request details
+    content_type = request.headers.get("content-type", "not set")
+    logger.info(f"[AudioSpeech] Content-Type: {content_type}")
+    logger.info(f"[AudioSpeech] Method: {request.method}")
+
+    # Parse JSON body
+    try:
+        body = await request.json()
+    except Exception as e:
+        logger.exception(f"[AudioSpeech] JSON parse error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_json",
+                "message": f"Body deve ser JSON válido. Error: {str(e)}",
+            },
+        ) from e
+
+    # Validar campos obrigatórios
+    model = body.get("model")
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "missing_model",
+                "message": "Campo 'model' é obrigatório.",
+            },
+        )
+
+    input_text = body.get("input")
+    if not input_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "missing_input",
+                "message": "Campo 'input' (texto a sintetizar) é obrigatório.",
+            },
+        )
+
+    # Campos opcionais com defaults OpenAI-compat
+    voice = body.get("voice", "alloy")
+    response_format = body.get("response_format", "mp3")
+    speed = body.get("speed", 1.0)
+
+    # Construir payload para o upstream
+    upstream_body = {
+        "model": model,
+        "input": input_text,
+        "voice": voice,
+        "response_format": response_format,
+        "speed": speed,
+    }
+
+    logger.info(
+        "[AudioSpeech] Request: model=%s, voice=%s, format=%s, speed=%s, input_len=%d",
+        model,
+        voice,
+        response_format,
+        speed,
+        len(input_text),
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.speech_upstream_timeout) as client:
+            upstream = await client.post(
+                settings.speech_upstream_url,
+                json=upstream_body,
+            )
+    except httpx.TimeoutException as e:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={
+                "error": "upstream_timeout",
+                "message": f"TTS upstream não respondeu em {settings.speech_upstream_timeout}s.",
+            },
+        ) from e
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "upstream_unreachable",
+                "message": f"Falha ao contactar TTS upstream: {e}",
+            },
+        ) from e
+
+    # Tratar erros do upstream
+    if upstream.status_code >= 400:
+        content_type_upstream = upstream.headers.get("content-type", "")
+        if "application/json" in content_type_upstream:
+            try:
+                payload = upstream.json()
+            except Exception:
+                payload = {"error": "upstream_error", "message": upstream.text}
+            return JSONResponse(status_code=upstream.status_code, content=payload)
+        return JSONResponse(
+            status_code=upstream.status_code,
+            content={"error": "upstream_error", "message": upstream.text},
+        )
+
+    # Mapear content-type conforme formato de resposta
+    content_type_map = {
+        "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "flac": "audio/flac",
+        "ogg": "audio/ogg",
+        "aac": "audio/aac",
+        "opus": "audio/opus",
+    }
+    audio_content_type = content_type_map.get(response_format, "audio/mpeg")
+
+    # Resposta binária de áudio
+    audio_bytes = upstream.content
+    audio_size_bytes = len(audio_bytes)
+
+    logger.info(
+        "[AudioSpeech] Success: format=%s, size=%d bytes",
+        response_format,
+        audio_size_bytes,
+    )
+
+    # Registar usage (TTS conta como completion tokens baseados no comprimento do texto)
+    model_id = f"tts/{model}"
+    # Estimativa: ~1 token por 4 caracteres (aproximação OpenAI)
+    completion_tokens = len(input_text) // 4
+    total_tokens = completion_tokens
+    meta: dict[str, object] = {
+        "source": "speech_upstream",
+        "speech_upstream_url": settings.speech_upstream_url,
+        "voice": voice,
+        "response_format": response_format,
+        "speed": speed,
+        "input_chars": len(input_text),
+        "audio_size_bytes": audio_size_bytes,
+    }
+
+    try:
+        from src.usage.service import record_turn_usage
+
+        await record_turn_usage(
+            turn_id=ctx.accumulator_bucket_id,
+            app_id=ctx.app_id,
+            chat_session_id=ctx.session_id,
+            conversation_id=ctx.conversation_id,
+            user_message=ctx.user_message or "(text-to-speech)",
+            user_id=ctx.user_id,
+            user_name=ctx.user_name,
+            user_email=ctx.user_email,
+            company_id=ctx.company_id,
+            company_name=ctx.company_name,
+            model_id=model_id,
+            prompt_tokens=0,  # TTS não tem prompt tokens no sentido tradicional
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            tool_calls_count=0,
+            meta=meta,
+        )
+    except Exception as e:
+        logger.warning("[AudioSpeech] Falha ao registar usage turn=%s: %s", ctx.turn_id[:8], e)
+
+    return Response(
+        content=audio_bytes,
+        media_type=audio_content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="speech.{response_format}"',
+        },
+    )
