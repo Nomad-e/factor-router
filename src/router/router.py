@@ -1,8 +1,12 @@
 """
 Factor AI — LLM Router
 -----------------------
-Escolhe o modelo mais adequado e mais barato para cada mensagem.
-Baseado em Signal-Decision (vLLM SR 2025) e Router-R1 (UIUC NeurIPS 2025).
+Escolhe o modelo mais adequado e mais barato para cada mensagem usando APENAS o classificador LLM (Ollama).
+Sem heurística de keywords — o LLM decide baseado no prompt em classifier_prompt.py.
+
+Timeout: CLASSIFIER_TIMEOUT_SECONDS (default: 2.0s)
+Se o LLM demorar >2s → fallback para default_model do YAML.
+
 Nunca bloqueia o agente — fallback gracioso sempre.
 """
 from __future__ import annotations
@@ -191,113 +195,18 @@ def _heuristic_route_model(
     openrouter_balance_low: bool = False,
 ) -> str:
     """
-    Decide o modelo localmente, sem chamar um LLM.
-
-    O objectivo é devolver o `model_id` em poucas microssegundos/milissegundos
-    quando a intenção já está clara.
+    Fallback simples quando o LLM classifier falha ou timeout.
+    Retorna o default_model configurado no YAML.
     """
-    text = _normalize_match_text(user_message)
-    if not text:
-        return _DEFAULT_MODEL
-
-    if tool_choice == "required":
-        return "openai/gpt-4.1-mini"
-
-    if any(term in text for term in ("video", "audio", "omni-modal", "omnimodal", "multimodal")):
-        return "xiaomi/mimo-v2-omni"
-
-    if any(term in text for term in ("complex tier", "complex")):
-        return "moonshotai/kimi-k2.5"
-
-    if any(term in text for term in ("frontier", "maximum capability", "maximum", "best available")):
-        return "moonshotai/kimi-k2.5"
-
-    if any(term in text for term in ("reasoning+", "reasoning plus", "kimi", "k2.5", "kimi k2.5")):
-        return "moonshotai/kimi-k2.5"
-
-    if has_image or any(term in text for term in ("screenshot", "image", "chart", "plot", "diagram", "mockup", "pdf", "vision", "visual")):
-        if any(term in text for term in ("code", "coding", "refactor", "debug", "implement", "ui", "frontend")):
-            return "moonshotai/kimi-k2.5"
-        if len(text) > 8_000 or any(term in text for term in ("document", "transcript", "logs", "paste", "long context")):
-            return "qwen/qwen3.5-plus-02-15"
-        return "qwen/qwen3.5-plus-02-15"
-
-    if len(text) > 12_000 or any(term in text for term in ("long context", "full repo", "full file", "entire repo", "transcript", "log dump")):
-        return "qwen/qwen3.5-plus-02-15"
-
-    if any(term in text for term in ("many2one", "lookup", "resolve id", "resolve the id", "multi-step", "multi step", "conditional", "if then", "if/else", "cascade")):
-        return "moonshotai/kimi-k2.5"
-
-    if any(term in text for term in ("create", "update", "delete", "approve", "assign", "sync", "orchestrate")) and _looks_like_business_work(text):
-        return "qwen/qwen3.5-397b-a17b"
-
-    if any(term in text for term in ("code", "bug", "fix", "refactor", "implement", "test", "repo", "pull request", "python", "typescript", "javascript", "react", "api", "endpoint", "class", "function", "frontend", "3d", "game")):
-        return "qwen/qwen3.6-plus"
-
-    if _looks_like_business_work(text):
-        return "qwen/qwen3.5-397b-a17b"
-
-    return "qwen/qwen3.5-397b-a17b" if openrouter_balance_low else _DEFAULT_MODEL
+    return _DEFAULT_MODEL
 
 
 def _heuristic_is_confident(user_message: str, *, tool_choice: Any = None) -> bool:
     """
-    Heurística de confiança para o modo híbrido.
-
-    Se o texto tiver sinais claros, fica local. Caso contrário, chama o classificador LLM.
+    Sempre retorna False para forçar o uso do LLM classifier.
+    O router decide baseado apenas no LLM, sem heurística de keywords.
     """
-    text = _normalize_match_text(user_message)
-    if not text:
-        return True
-    if tool_choice == "required":
-        return True
-
-    confident_markers = (
-        "gpt-5.4-mini",
-        "gpt 5.4 mini",
-        "frontier",
-        "maximum capability",
-        "maximum",
-        "best available",
-        "reasoning+",
-        "reasoning plus",
-        "kimi",
-        "k2.5",
-        "screenshot",
-        "image",
-        "chart",
-        "plot",
-        "diagram",
-        "mockup",
-        "pdf",
-        "vision",
-        "visual",
-        "long context",
-        "full repo",
-        "full file",
-        "entire repo",
-        "transcript",
-        "log dump",
-        "many2one",
-        "lookup",
-        "resolve id",
-        "resolve the id",
-        "multi-step",
-        "multi step",
-        "conditional",
-        "if then",
-        "if/else",
-        "cascade",
-        "code",
-        "bug",
-        "fix",
-        "refactor",
-        "implement",
-        "test",
-        "repo",
-        "pull request",
-        "python",
-        "typescript",
+    return False
         "javascript",
         "react",
         "api",
