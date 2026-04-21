@@ -118,6 +118,39 @@ models:
   # Direct Agiweb queries, focused CRUD, linear reasoning, code, light VLM
   # ===========================================================================
 
+  - id: "factorai/qwen3.6-35b-a3b"
+    tier: "reasoning"
+    task_type: "reasoning"
+    tool_calls: "1-5"
+    context_window: 131072
+    pricing:
+      input_per_1m_tokens: "$0.00"
+      output_per_1m_tokens: "$0.00"
+    description: "Qwen3.6 35B (3B ativos) MoE - FactorAI vLLM local"
+    best_for:
+      - "Raciocínio complexo"
+      - "Code generation"
+      - "Tarefas gerais de baixo custo"
+    not_for: "Quando precisares de modelos frontier (Gemini, GPT-4)"
+    provider: "factorai"
+    is_local: true
+
+  - id: "factorai/qwen2.5:0.5b"
+    tier: "simple"
+    task_type: "simple"
+    tool_calls: "0-2"
+    context_window: 32768
+    pricing:
+      input_per_1m_tokens: "$0.00"
+      output_per_1m_tokens: "$0.00"
+    description: "Qwen2.5 0.5B - ultra-rápido para tarefas simples"
+    best_for:
+      - "Saudações"
+      - "Classificação simples"
+      - "Extração de entidades"
+    not_for: "Raciocínio complexo ou código"
+    provider: "factorai"
+    is_local: true
 
   - id: "qwen/qwen3.6-plus"
     tier: "reasoning"
