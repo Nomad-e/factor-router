@@ -228,33 +228,37 @@ class TestModelFallback:
     def test_fallback_after_threshold(self):
         """Retorna fallback após 2 falhas consecutivas."""
         # Primeira falha
-        fb = record_model_failure("xiaomi/mimo-v2-omni")
+        fb = record_model_failure("moonshotai/kimi-k2.5")
         assert fb is None
-        
-        # Segunda falha → retorna fallback
-        fb = record_model_failure("xiaomi/mimo-v2-omni")
-        assert fb == "moonshotai/kimi-k2.5"
+
+        # Segunda falha → retorna primeiro fallback na cadeia (factorai)
+        fb = record_model_failure("moonshotai/kimi-k2.5")
+        assert fb == "factorai/qwen3.6-35b-a3b"
 
     def test_success_resets_counter(self):
         """Sucesso reseta contador de falhas."""
-        record_model_failure("xiaomi/mimo-v2-omni")
-        record_model_success("xiaomi/mimo-v2-omni")
-        
+        record_model_failure("moonshotai/kimi-k2.5")
+        record_model_success("moonshotai/kimi-k2.5")
+
         # Após sucesso, precisa de 2 falhas novamente
-        fb = record_model_failure("xiaomi/mimo-v2-omni")
+        fb = record_model_failure("moonshotai/kimi-k2.5")
         assert fb is None
 
     def test_get_fallback_model(self):
         """get_fallback_model retorna próximo na cadeia."""
-        fb = get_fallback_model("xiaomi/mimo-v2-omni")
-        assert fb == "moonshotai/kimi-k2.5"
-        
         fb = get_fallback_model("moonshotai/kimi-k2.5")
         assert fb == "qwen/qwen3.6-plus"
+
+        fb = get_fallback_model("qwen/qwen3.6-plus")
+        assert fb == "x-ai/grok-4.1-fast"
+
+        fb = get_fallback_model("x-ai/grok-4.1-fast")
+        assert fb == "google/gemini-2.5-flash-lite"
 
     def test_fallback_chain_order(self):
         """Cadeia de fallback está na ordem correta."""
         assert _FALLBACK_CHAIN == [
+            "factorai/qwen3.6-35b-a3b",
             "moonshotai/kimi-k2.5",
             "qwen/qwen3.6-plus",
             "x-ai/grok-4.1-fast",
