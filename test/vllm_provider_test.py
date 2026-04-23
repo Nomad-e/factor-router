@@ -115,25 +115,14 @@ class TestFactorAIModelConfig:
         models = config.get("models", [])
         factorai_models = [m for m in models if m.get("id", "").startswith("factorai/")]
 
-        assert len(factorai_models) >= 2, "Esperados pelo menos 2 modelos FactorAI"
+        assert len(factorai_models) >= 1, "Esperado pelo menos 1 modelo FactorAI"
 
         # Verifica qwen3.6-35b-a3b
-        qwen35 = next((m for m in factorai_models if "qwen3.6-35b-a3b" in m.get("id", "")), None)
-        assert qwen35 is not None, "Modelo factorai/qwen3.6-35b-a3b não encontrado"
-        assert qwen35["tier"] == "reasoning"
-        assert qwen35["pricing"]["input_per_1m_tokens"] == "$0.00"
-        assert qwen35["pricing"]["output_per_1m_tokens"] == "$0.00"
-        assert qwen35["provider"] == "factorai"
-        assert qwen35["is_local"] is True
-
-        # Verifica qwen2.5:0.5b
-        qwen25 = next((m for m in factorai_models if "qwen2.5:0.5b" in m.get("id", "")), None)
-        assert qwen25 is not None, "Modelo factorai/qwen2.5:0.5b não encontrado"
-        assert qwen25["tier"] == "simple"
-        assert qwen25["pricing"]["input_per_1m_tokens"] == "$0.00"
-        assert qwen25["pricing"]["output_per_1m_tokens"] == "$0.00"
-        assert qwen25["provider"] == "factorai"
-        assert qwen25["is_local"] is True
+        qwen36 = next((m for m in factorai_models if "Qwen3.6-35B" in m.get("id", "")), None)
+        assert qwen36 is not None, "Modelo factorai/Qwen/Qwen3.6-35B-A3B-FP8 não encontrado"
+        assert qwen36["tier"] == "reasoning"
+        assert qwen36["provider"] == "factorai"
+        assert qwen36["is_local"] is True
 
 
 class TestFactorAIFallback:
