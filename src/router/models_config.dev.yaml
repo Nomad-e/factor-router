@@ -118,7 +118,7 @@ models:
   # Direct Agiweb queries, focused CRUD, linear reasoning, code, light VLM
   # ===========================================================================
 
-  - id: "factorai/Qwen/Qwen3.6-27B-FP8"
+  - id: "factorai/Qwen/Qwen3.6-27B"
     tier: "reasoning"
     task_type: "reasoning"
     tool_calls: "1-5"
@@ -140,49 +140,49 @@ models:
     provider: "factorai"
     is_local: true
 
-  - id: "qwen/qwen3.6-27b"
-    tier: "reasoning"
-    task_type: "reasoning"
-    tool_calls: "1-5"
-    context_window: 262144
-    pricing:
-      input_per_1m_tokens: "$0.195"
-      output_per_1m_tokens: "$1.56"
-    description: >
-      Qwen3.6 27B is a dense 27B-parameter model from the Qwen team (Alibaba),
-      designed for coding, reasoning, and agentic workflows. Supports text, image,
-      and video inputs, with a native context window of 262,144 tokens.
-    best_for:
-      - "Agentic coding and multi-step reasoning with 1-5 tool calls"
-      - "Repository-level code comprehension, implementation, and refactoring"
-      - "Front-end development workflows and structured problem solving"
-    not_for: >
-      Extremely long-horizon workflows with deep branching and broad cross-entity
-      synthesis that need reasoning+ or complex-tier models.
-    provider: "qwen"
-    is_local: false
+  # - id: "qwen/qwen3.6-27b"
+  #   tier: "reasoning"
+  #   task_type: "reasoning"
+  #   tool_calls: "1-5"
+  #   context_window: 262144
+  #   pricing:
+  #     input_per_1m_tokens: "$0.195"
+  #     output_per_1m_tokens: "$1.56"
+  #   description: >
+  #     Qwen3.6 27B is a dense 27B-parameter model from the Qwen team (Alibaba),
+  #     designed for coding, reasoning, and agentic workflows. Supports text, image,
+  #     and video inputs, with a native context window of 262,144 tokens.
+  #   best_for:
+  #     - "Agentic coding and multi-step reasoning with 1-5 tool calls"
+  #     - "Repository-level code comprehension, implementation, and refactoring"
+  #     - "Front-end development workflows and structured problem solving"
+  #   not_for: >
+  #     Extremely long-horizon workflows with deep branching and broad cross-entity
+  #     synthesis that need reasoning+ or complex-tier models.
+  #   provider: "qwen"
+  #   is_local: false
 
-  - id: "qwen/qwen3.5-plus-20260420"
-    tier: "reasoning"
-    task_type: "reasoning"
-    tool_calls: "1-5"
-    context_window: 1000000
-    pricing:
-      input_per_1m_tokens: "$0.40"
-      output_per_1m_tokens: "$2.40"
-    description: >
-      Qwen3.5 Plus (2026-04-20) is an updated large-scale multimodal model from
-      Alibaba. Supports text, image, and video input with text output and a
-      1,000,000 token context window, including tiered pricing above 256K tokens.
-    best_for:
-      - "Long-context tasks (up to 1M tokens) with 1-5 tool calls"
-      - "Multimodal reasoning with text + image + video inputs"
-      - "Complex coding and analysis when 262K context is insufficient"
-    not_for: >
-      Simple short-context tasks where lower-cost local or smaller reasoning models
-      are sufficient.
-    provider: "qwen"
-    is_local: false
+  # - id: "qwen/qwen3.5-plus-20260420"
+  #   tier: "reasoning"
+  #   task_type: "reasoning"
+  #   tool_calls: "1-5"
+  #   context_window: 1000000
+  #   pricing:
+  #     input_per_1m_tokens: "$0.40"
+  #     output_per_1m_tokens: "$2.40"
+  #   description: >
+  #     Qwen3.5 Plus (2026-04-20) is an updated large-scale multimodal model from
+  #     Alibaba. Supports text, image, and video input with text output and a
+  #     1,000,000 token context window, including tiered pricing above 256K tokens.
+  #   best_for:
+  #     - "Long-context tasks (up to 1M tokens) with 1-5 tool calls"
+  #     - "Multimodal reasoning with text + image + video inputs"
+  #     - "Complex coding and analysis when 262K context is insufficient"
+  #   not_for: >
+  #     Simple short-context tasks where lower-cost local or smaller reasoning models
+  #     are sufficient.
+  #   provider: "qwen"
+  #   is_local: false
 
   # - id: "factorai/Qwen/Qwen3-Coder-Next-FP8"
   #   tier: "reasoning"
