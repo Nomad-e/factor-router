@@ -118,27 +118,27 @@ models:
   # Direct Agiweb queries, focused CRUD, linear reasoning, code, light VLM
   # ===========================================================================
 
-  - id: "factorai/Qwen/Qwen3.6-27B-FP8"
-    tier: "reasoning"
-    task_type: "reasoning"
-    tool_calls: "1-5"
-    context_window: 131072
-    pricing:
-      input_per_1m_tokens: "$0.195"
-      output_per_1m_tokens: "$1.56"
-    description: >
-      Qwen3.6 27B is a dense 27B-parameter model from the Qwen team (Alibaba),
-      designed for coding, reasoning, and agentic workflows. Supports text, image,
-      and video inputs, with a native context window of 262,144 tokens.
-    best_for:
-      - "Agentic coding and multi-step reasoning with 1-5 tool calls"
-      - "Repository-level code comprehension, implementation, and refactoring"
-      - "Front-end development workflows and structured problem solving"
-    not_for: >
-      Extremely long-horizon workflows with deep branching and broad cross-entity
-      synthesis that need reasoning+ or complex-tier models.
-    provider: "factorai"
-    is_local: true
+  # - id: "factorai/Qwen/Qwen3.6-27B-FP8"
+  #   tier: "reasoning"
+  #   task_type: "reasoning"
+  #   tool_calls: "1-5"
+  #   context_window: 131072
+  #   pricing:
+  #     input_per_1m_tokens: "$0.195"
+  #     output_per_1m_tokens: "$1.56"
+  #   description: >
+  #     Qwen3.6 27B is a dense 27B-parameter model from the Qwen team (Alibaba),
+  #     designed for coding, reasoning, and agentic workflows. Supports text, image,
+  #     and video inputs, with a native context window of 262,144 tokens.
+  #   best_for:
+  #     - "Agentic coding and multi-step reasoning with 1-5 tool calls"
+  #     - "Repository-level code comprehension, implementation, and refactoring"
+  #     - "Front-end development workflows and structured problem solving"
+  #   not_for: >
+  #     Extremely long-horizon workflows with deep branching and broad cross-entity
+  #     synthesis that need reasoning+ or complex-tier models.
+  #   provider: "factorai"
+  #   is_local: true
 
   - id: "qwen/qwen3.6-27b"
     tier: "reasoning"
